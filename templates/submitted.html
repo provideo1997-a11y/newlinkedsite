@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block title %}Request received — YAKUZA{% endblock %}{% block content %}<section class="success-page"><div class="success-symbol">✓</div><span class="section-kicker">TRANSMISSION RECEIVED / 200</span><h1>{{ t('sent') }}</h1><a class="button button-outline" href="{{ url_for('home') }}">{{ t('back') }} <span>↗</span></a></section>{% endblock %}
