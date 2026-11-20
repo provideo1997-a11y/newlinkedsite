@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: yakuza-digital-consulting
+    name: yakuza-digital-agency
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --workers 2 --bind 0.0.0.0:$PORT app:app
-    healthCheckPath: /healthz
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 60 app:app
+    healthCheckPath: /health
     envVars:
       - key: SECRET_KEY
         generateValue: true
@@ -13,11 +13,9 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: WHATSAPP_NUMBER
-        sync: false
-      - key: DATABASE_URL
-        sync: false
       - key: COOKIE_SECURE
         value: "1"
-      - key: PUBLIC_STATUS_LOOKUP
-        value: "1"
+      - key: ADMIN_URL_PREFIX
+        value: /private-inbox
+      - key: WHATSAPP_NUMBER
+        value: "4917642484892"

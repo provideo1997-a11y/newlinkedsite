@@ -1,128 +1,232 @@
-import os,re,json,hmac,secrets
-from datetime import datetime
-from urllib.parse import quote,urlparse
-from flask import Flask,render_template,request,redirect,url_for,session,flash,abort
+import os, secrets, csv, io, re, uuid, random
+from datetime import datetime, timezone, timedelta
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, make_response, Response
+from flask_sqlalchemy import SQLAlchemy
+from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from config import Config
-from models import db,Case,AdminNote,AuditLog
-from services.i18n import tr
-from services.risk import assess_risk
-csrf=CSRFProtect()
-limiter=Limiter(key_func=get_remote_address,default_limits=["200 per hour"],storage_uri=os.getenv("RATELIMIT_STORAGE_URI","memory://"))
-def whatsapp_link(number, message):
- digits=re.sub(r"\D","",number or "")
- if not digits:return None
- return "https://wa.me/"+digits+"?text="+quote(message)
+from wtforms import StringField, EmailField, SelectField, TextAreaField, PasswordField, SubmitField
+from wtforms.validators import DataRequired, Email, Length, Optional, Regexp
+from werkzeug.security import generate_password_hash, check_password_hash
+from urllib.parse import quote
+from sqlalchemy import desc
 
-def create_app():
- app=Flask(__name__);app.config.from_object(Config);db.init_app(app);csrf.init_app(app);limiter.init_app(app)
- def lang(): return session.get("lang","en")
- @app.context_processor
- def inject(): return {"t":lambda k,**kw:tr(lang(),k,**kw),"lang":lang(),"direction":"rtl" if lang() in ("ar","ar-tn") else "ltr","csrf_token":lambda:__import__("flask_wtf.csrf",fromlist=["generate_csrf"]).generate_csrf()}
- @app.before_request
- def permanent(): session.permanent=True
- @app.after_request
- def headers(r):
-  r.headers["X-Content-Type-Options"]="nosniff";r.headers["X-Frame-Options"]="DENY";r.headers["Referrer-Policy"]="strict-origin-when-cross-origin";r.headers["Permissions-Policy"]="camera=(),microphone=(),geolocation=()"
-  r.headers["Content-Security-Policy"]="default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; connect-src 'self'"
-  if request.is_secure:r.headers["Strict-Transport-Security"]="max-age=31536000; includeSubDomains"
-  return r
- @app.get("/language/<code>")
- def language(code):
-  if code not in ("en","fr","ar","ar-tn"):abort(404)
-  session["lang"]=code;dest=request.args.get("next","/")
-  return redirect(dest if dest.startswith("/") and not dest.startswith("//") else "/")
- @app.get("/")
- def index():return render_template("index.html")
- @app.get("/about")
- def about():return render_template("about.html")
- @app.route("/intake",methods=["GET","POST"])
- @limiter.limit("5 per hour",methods=["POST"])
- def intake():
-  if request.method=="GET":
-   a,b=secrets.randbelow(8)+2,secrets.randbelow(8)+2;session["human"]=str(a+b);session["human_time"]=datetime.utcnow().timestamp()
-   return render_template("intake.html",a=a,b=b)
-  answer=request.form.get("human_answer","").strip();expected=session.pop("human",None);issued=session.pop("human_time",0)
-  if not expected or datetime.utcnow().timestamp()-issued>600 or not hmac.compare_digest(str(expected),answer):
-   flash("Human check failed. Please try again.","error");return redirect(url_for("intake"))
-  if request.form.get("website",""):abort(400)
-  def val(k,n,required=False):
-   x=request.form.get(k,"")
-   if not isinstance(x,str):raise ValueError("Invalid field")
-   x=x.strip()
-   if required and not x:raise ValueError("Please complete required fields.")
-   if len(x)>n or any(ord(c)<32 and c not in "\n\t" for c in x):raise ValueError("Invalid or overlong field.")
-   return x
-  try:
-   name=val("name",100,True);email=val("email",254,True).lower();platform=val("platform",40,True);handle=val("handle",200);phone=val("phone",32);date=val("incident_date",10);category=val("category",40,True);priority=val("priority",16,True);evidence=val("evidence_url",500);description=val("description",5000,True);nextstep=val("preferred_next_step",20,True)
-   if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+",email):raise ValueError("Enter a valid email.")
-   if len(description)<25:raise ValueError("Description must contain at least 25 characters.")
-   if platform not in ["Not specified","Instagram","Facebook","TikTok","Google","X","LinkedIn","Other"]:raise ValueError("Invalid platform.")
-   if category not in ["recovery","risk","impersonation","scam","privacy","reputation","compliance","security","other"] or priority not in ["normal","high","critical"] or nextstep not in ["inbox","whatsapp"]:raise ValueError("Invalid selection.")
-   if evidence and (urlparse(evidence).scheme!="https" or not urlparse(evidence).netloc):raise ValueError("Evidence link must use HTTPS.")
-   if date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}",date):raise ValueError("Invalid incident date.")
-   if not request.form.get("consent"):raise ValueError("Consent is required.")
-  except ValueError as e:
-   flash(str(e),"error");a,b=3,4;session["human"]="7";session["human_time"]=datetime.utcnow().timestamp();return render_template("intake.html",a=a,b=b),400
-  risk=assess_risk(description,evidence);ref="YKZ-"+datetime.utcnow().strftime("%y%m%d")+"-"+secrets.token_hex(3).upper()
-  c=Case(reference=ref,language=lang(),name=name,email=email,platform=platform,handle=handle or None,phone=phone or None,incident_date=date or None,category=category,priority=priority,evidence_url=evidence or None,description=description,preferred_next_step=nextstep,risk_score=risk["score"],risk_flags_json=json.dumps(risk["flags"],ensure_ascii=False))
-  db.session.add(c);db.session.flush();db.session.add(AuditLog(actor="public",action="case_created",case_reference=ref,detail="Intake submitted"));db.session.commit()
-  # The database commit happens before any WhatsApp action. WhatsApp is a
-  # user-initiated click-to-chat handoff; the website never sends messages silently.
-  support_number=os.getenv("WHATSAPP_NUMBER","")
-  message=(f"Hello YAKUZA, my case {ref} has been recorded. "
-           f"Name: {name}. Request: {category}. Priority: {priority}. "
-           "Please advise on the next steps.")
-  wa_url=whatsapp_link(support_number,message)
-  return render_template("intake_success.html",case=c,whatsapp_url=wa_url,preferred_next_step=nextstep)
- @app.route("/status",methods=["GET","POST"])
- @limiter.limit("10 per hour",methods=["POST"])
- def status():
-  result=None;searched=request.method=="POST"
-  if searched and app.config["PUBLIC_STATUS_LOOKUP"]:
-   ref=request.form.get("reference","").strip().upper();email=request.form.get("email","").strip().lower()
-   if len(ref)<=24 and len(email)<=254:result=Case.query.filter_by(reference=ref,email=email).first()
-  return render_template("status_lookup.html",result=result,searched=searched)
- def admin(): 
-  if not session.get("admin"):abort(403)
- @app.route("/admin/login",methods=["GET","POST"])
- @limiter.limit("10 per hour",methods=["POST"])
- def admin_login():
-  if request.method=="POST":
-   u=request.form.get("username","");p=request.form.get("password","");eu=app.config["ADMIN_USERNAME"];ep=app.config["ADMIN_PASSWORD"]
-   ok=bool(eu and ep) and hmac.compare_digest(u,eu) and hmac.compare_digest(p,ep)
-   if ok:
-    session.clear();session["admin"]=True;session["admin_user"]=eu;session.permanent=True;db.session.add(AuditLog(actor=eu,action="admin_login"));db.session.commit();return redirect(url_for("dashboard"))
-   db.session.add(AuditLog(actor="unknown",action="admin_login_failed"));db.session.commit();flash("Invalid credentials.","error")
-  return render_template("admin_login.html")
- @app.post("/admin/logout")
- def logout():
-  admin();db.session.add(AuditLog(actor=session.get("admin_user","admin"),action="logout"));db.session.commit();session.clear();return redirect(url_for("admin_login"))
- @app.get("/admin")
- def dashboard():
-  admin();f=request.args.get("status","all");q=Case.query
-  if f in ("new","reviewing","waiting","resolved","closed"):q=q.filter_by(status=f)
-  cases=q.order_by(Case.created_at.desc()).limit(300).all();logs=AuditLog.query.order_by(AuditLog.created_at.desc()).limit(30).all()
-  return render_template("admin_dashboard.html",cases=cases,logs=logs,selected=f)
- @app.route("/admin/case/<reference>",methods=["GET","POST"])
- def case_detail(reference):
-  admin();c=Case.query.filter_by(reference=reference).first_or_404()
-  if request.method=="POST":
-   state=request.form.get("status","");note=request.form.get("note","").strip()
-   if state not in ("new","reviewing","waiting","resolved","closed") or len(note)>2000:abort(400)
-   c.status=state
-   if note:db.session.add(AdminNote(case_id=c.id,author=session.get("admin_user","admin"),body=note))
-   db.session.add(AuditLog(actor=session.get("admin_user","admin"),action="case_updated",case_reference=c.reference,detail=state));db.session.commit();flash("Case updated.","success");return redirect(url_for("case_detail",reference=reference))
-  client_wa=whatsapp_link(c.phone, f"Hello {c.name}, this is YAKUZA regarding case {c.reference}. We would like to follow up on your request.")
-  return render_template("admin_case.html",case=c,flags=json.loads(c.risk_flags_json or "[]"),client_whatsapp_url=client_wa)
- @app.get("/healthz")
- def healthz():
-  try:db.session.execute(db.text("SELECT 1"));return {"status":"ok","database":"reachable"},200
-  except Exception:return {"status":"degraded"},503
- @app.errorhandler(429)
- def limited(e):return render_template("error.html",code=429,message="Too many requests. Try later."),429
- with app.app_context():db.create_all()
- return app
-app=create_app()
+app = Flask(__name__, instance_relative_config=True)
+os.makedirs(app.instance_path, exist_ok=True)
+ADMIN_URL_PREFIX = os.environ.get('ADMIN_URL_PREFIX', '/private-inbox').strip()
+if not ADMIN_URL_PREFIX.startswith('/') or ADMIN_URL_PREFIX.startswith('//') or '..' in ADMIN_URL_PREFIX:
+    raise RuntimeError('ADMIN_URL_PREFIX must be a safe absolute URL path.')
+ADMIN_URL_PREFIX = ADMIN_URL_PREFIX.rstrip('/') or '/private-inbox'
+
+app.config.update(
+    SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32),
+    SQLALCHEMY_DATABASE_URI=os.environ.get('DATABASE_URL', 'sqlite:///' + os.path.join(app.instance_path, 'yakuza.db')).replace('postgres://','postgresql://',1),
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True},
+    SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','0') == '1',
+    WTF_CSRF_TIME_LIMIT=3600,
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
+    SESSION_REFRESH_EACH_REQUEST=True,
+)
+db=SQLAlchemy(app); csrf=CSRFProtect(app)
+limiter=Limiter(get_remote_address, app=app, default_limits=['200 per day','50 per hour'], storage_uri=os.environ.get('RATELIMIT_STORAGE_URI','memory://'))
+
+LANGS={
+'en': {'name':'English','dir':'ltr','nav_home':'Home','nav_services':'Capabilities','nav_about':'About','nav_contact':'Contact','eyebrow':'DIGITAL TRUST • RECOVERY • COMPLIANCE','hero_a':'RECLAIM','hero_b':'YOUR DIGITAL','hero_c':'GROUND.','hero_desc':'Strategic account recovery guidance, digital risk response, and compliance consulting — built around your ownership, privacy, and control.','cta_primary':'Start a secure request','cta_secondary':'Explore capabilities','scroll':'SCROLL TO EXPLORE','status':'SYSTEMS ONLINE','trusted':'A CLEARER PATH THROUGH DIGITAL COMPLEXITY','services_title':'Precision when it matters.','services_desc':'A calm, documented process for complex digital account and trust challenges.','s1':'Account recovery guidance','s1d':'Structured, platform-approved recovery support for accounts you own or are authorized to manage.','s2':'Digital risk response','s2d':'Incident triage, evidence organization, and practical next steps after suspicious activity.','s3':'Compliance advisory','s3d':'Policy readiness, identity-verification preparation, and governance documentation.','s4':'Security posture review','s4d':'Practical account hygiene, access-control, and prevention recommendations.','process':'THE METHOD','process_title':'Clarity. Control. Closure.','p1':'Understand','p1d':'We scope the issue and confirm authorization.','p2':'Assess','p2d':'We map evidence, risks, and platform processes.','p3':'Act','p3d':'You follow a clear, documented action plan.','p4':'Strengthen','p4d':'We help reduce repeat incidents.','about_title':'Digital recovery, without shortcuts.','about_desc':'YAKUZA is a digital recovery and compliance consultancy focused on legitimate, owner-authorized support. We never ask for passwords, one-time codes, or remote access to personal accounts.','contact_title':'Let’s map your next move.','contact_desc':'Tell us what happened. Do not include passwords, verification codes, recovery keys, or sensitive identity documents.','form_name':'Your name','form_email':'Work email','form_topic':'What do you need help with?','form_message':'Briefly describe the situation','form_submit':'Send secure inquiry','topic_recovery':'Account recovery guidance','topic_risk':'Digital risk response','topic_compliance':'Compliance advisory','topic_other':'Other inquiry','footer_note':'Independent consulting. No affiliation with social platforms.','privacy':'Privacy','admin':'Team portal','sent':'Your inquiry has been received. We will review it and respond using the email you provided.','back':'Back to home','login':'Team sign in','username':'Username','password':'Password','sign_in':'Sign in','dashboard':'Inquiry dashboard','logout':'Sign out','case':'Case','status_label':'Status','new':'New','reviewing':'Reviewing','closed':'Closed','update':'Update','no_cases':'No inquiries yet.','disclaimer':'YAKUZA cannot guarantee account restoration. All recovery actions must be completed by the account owner through official platform channels.','privacy_title':'Privacy & data handling','privacy_text':'We use inquiry details only to respond to requests, maintain service records, and protect the service. Do not submit passwords, authentication codes, recovery keys, payment card data, or unnecessary sensitive documents.','loading':'INITIALIZING SECURE INTERFACE','loading_sub':'ESTABLISHING ENCRYPTED SESSION','menu':'Open menu'},
+'ar': {'name':'العربية','dir':'rtl','nav_home':'الرئيسية','nav_services':'الخدمات','nav_about':'من نحن','nav_contact':'اتصل بنا','eyebrow':'الثقة الرقمية • الاستعادة • الامتثال','hero_a':'استعد','hero_b':'سيطرتك','hero_c':'الرقمية.','hero_desc':'إرشاد لاستعادة الحسابات، والاستجابة للمخاطر الرقمية، والاستشارات التنظيمية مع احترام الملكية والخصوصية.','cta_primary':'ابدأ طلباً آمناً','cta_secondary':'اكتشف خدماتنا','scroll':'اكتشف المزيد','status':'الأنظمة تعمل','trusted':'طريق أوضح وسط التعقيد الرقمي','services_title':'دقة عندما تكون مهمة.','services_desc':'منهج واضح وموثق للتحديات الرقمية المعقدة.','s1':'إرشاد استعادة الحساب','s1d':'دعم منظم ومتوافق مع المنصات للحسابات التي تملكها أو تديرها بتفويض.','s2':'الاستجابة للمخاطر الرقمية','s2d':'فرز الحوادث وتنظيم الأدلة وتحديد الخطوات بعد النشاط المشبوه.','s3':'استشارات الامتثال','s3d':'الاستعداد للسياسات والتحقق من الهوية وتوثيق الحوكمة.','s4':'مراجعة الوضع الأمني','s4d':'توصيات عملية للنظافة الرقمية وإدارة الوصول والوقاية.','process':'المنهجية','process_title':'وضوح. تحكم. إغلاق.','p1':'الفهم','p1d':'نحدد المشكلة ونتحقق من التفويض.','p2':'التقييم','p2d':'نراجع الأدلة والمخاطر وإجراءات المنصة.','p3':'التنفيذ','p3d':'تتبع خطة عمل واضحة وموثقة.','p4':'التعزيز','p4d':'نساعد على تقليل تكرار الحوادث.','about_title':'استعادة رقمية بلا اختصارات.','about_desc':'ياكوزا استشارات للاستعادة الرقمية والامتثال، وتركز على الدعم المشروع والمصرح به من المالك. لا نطلب كلمات المرور أو رموز التحقق أو الوصول عن بُعد.','contact_title':'لنحدد خطوتك التالية.','contact_desc':'اشرح ما حدث. لا ترسل كلمات مرور أو رموز تحقق أو مفاتيح استعادة أو وثائق هوية حساسة.','form_name':'الاسم','form_email':'البريد الإلكتروني','form_topic':'نوع المساعدة','form_message':'وصف مختصر للحالة','form_submit':'إرسال طلب آمن','topic_recovery':'إرشاد استعادة الحساب','topic_risk':'الاستجابة للمخاطر الرقمية','topic_compliance':'استشارات الامتثال','topic_other':'استفسار آخر','footer_note':'استشارات مستقلة وغير تابعة لمنصات التواصل.','privacy':'الخصوصية','admin':'بوابة الفريق','sent':'تم استلام طلبك. سنراجعه ونتواصل معك عبر البريد المقدم.','back':'العودة للرئيسية','login':'دخول الفريق','username':'اسم المستخدم','password':'كلمة المرور','sign_in':'دخول','dashboard':'لوحة الطلبات','logout':'خروج','case':'الطلب','status_label':'الحالة','new':'جديد','reviewing':'قيد المراجعة','closed':'مغلق','update':'تحديث','no_cases':'لا توجد طلبات بعد.','disclaimer':'لا تضمن ياكوزا استعادة الحساب. يجب على المالك تنفيذ جميع الإجراءات عبر القنوات الرسمية للمنصة.','privacy_title':'الخصوصية ومعالجة البيانات','privacy_text':'نستخدم بيانات الطلب للرد على الاستفسارات وإدارة السجلات وحماية الخدمة. لا ترسل كلمات مرور أو رموز مصادقة أو مفاتيح استعادة أو بيانات بطاقات الدفع.','loading':'تهيئة الواجهة الآمنة','loading_sub':'إنشاء جلسة مشفرة','menu':'فتح القائمة'},
+'fr': {'name':'Français','dir':'ltr','nav_home':'Accueil','nav_services':'Expertises','nav_about':'À propos','nav_contact':'Contact','eyebrow':'CONFIANCE NUMÉRIQUE • RÉCUPÉRATION • CONFORMITÉ','hero_a':'REPRENEZ','hero_b':'LE CONTRÔLE','hero_c':'NUMÉRIQUE.','hero_desc':'Conseil en récupération de comptes, réponse aux risques numériques et conformité, dans le respect de votre propriété et de votre confidentialité.','cta_primary':'Créer une demande sécurisée','cta_secondary':'Découvrir nos expertises','scroll':'DÉFILER POUR EXPLORER','status':'SYSTÈMES EN LIGNE','trusted':'UN PARCOURS PLUS CLAIR DANS LA COMPLEXITÉ NUMÉRIQUE','services_title':'La précision au bon moment.','services_desc':'Un processus clair et documenté pour les défis numériques complexes.','s1':'Conseil en récupération','s1d':'Accompagnement conforme aux plateformes pour les comptes qui vous appartiennent ou que vous gérez avec autorisation.','s2':'Réponse aux risques numériques','s2d':'Tri des incidents, organisation des preuves et prochaines étapes après une activité suspecte.','s3':'Conseil en conformité','s3d':'Préparation aux politiques, vérification d’identité et documentation de gouvernance.','s4':'Évaluation de sécurité','s4d':'Bonnes pratiques de compte, contrôle des accès et prévention.','process':'LA MÉTHODE','process_title':'Clarté. Contrôle. Résolution.','p1':'Comprendre','p1d':'Cadrer le problème et confirmer l’autorisation.','p2':'Évaluer','p2d':'Cartographier les preuves, risques et procédures.','p3':'Agir','p3d':'Suivre un plan d’action documenté.','p4':'Renforcer','p4d':'Réduire le risque de récidive.','about_title':'La récupération numérique, sans raccourcis.','about_desc':'YAKUZA est un cabinet de conseil indépendant axé sur l’assistance légitime et autorisée par le propriétaire. Nous ne demandons jamais de mots de passe, codes à usage unique ou accès à distance.','contact_title':'Définissons la prochaine étape.','contact_desc':'Expliquez la situation. N’incluez aucun mot de passe, code, clé de récupération ou document d’identité sensible.','form_name':'Votre nom','form_email':'E-mail professionnel','form_topic':'Votre besoin','form_message':'Décrivez brièvement la situation','form_submit':'Envoyer la demande','topic_recovery':'Conseil en récupération','topic_risk':'Réponse aux risques numériques','topic_compliance':'Conseil en conformité','topic_other':'Autre demande','footer_note':'Conseil indépendant, sans affiliation aux plateformes.','privacy':'Confidentialité','admin':'Espace équipe','sent':'Votre demande a bien été reçue.','back':'Retour à l’accueil','login':'Connexion équipe','username':'Identifiant','password':'Mot de passe','sign_in':'Se connecter','dashboard':'Tableau des demandes','logout':'Déconnexion','case':'Dossier','status_label':'Statut','new':'Nouveau','reviewing':'En cours','closed':'Clos','update':'Mettre à jour','no_cases':'Aucune demande.','disclaimer':'YAKUZA ne garantit pas la restauration d’un compte. Le propriétaire doit utiliser les canaux officiels.','privacy_title':'Confidentialité et données','privacy_text':'Les informations servent à répondre aux demandes et à protéger le service. Ne transmettez aucun mot de passe, code, clé de récupération ou donnée bancaire.','loading':'INITIALISATION DE L’INTERFACE SÉCURISÉE','loading_sub':'ÉTABLISSEMENT DE LA SESSION','menu':'Ouvrir le menu'},
+'es': {'name':'Español','dir':'ltr','nav_home':'Inicio','nav_services':'Servicios','nav_about':'Nosotros','nav_contact':'Contacto','eyebrow':'CONFIANZA DIGITAL • RECUPERACIÓN • CUMPLIMIENTO','hero_a':'RECUPERA','hero_b':'TU CONTROL','hero_c':'DIGITAL.','hero_desc':'Orientación para recuperar cuentas, responder a riesgos digitales y asesoría de cumplimiento, respetando tu propiedad y privacidad.','cta_primary':'Iniciar solicitud segura','cta_secondary':'Ver servicios','scroll':'DESPLAZA PARA EXPLORAR','status':'SISTEMAS ACTIVOS','trusted':'UN CAMINO MÁS CLARO EN LA COMPLEJIDAD DIGITAL','services_title':'Precisión cuando importa.','services_desc':'Un proceso claro y documentado para retos digitales complejos.','s1':'Orientación para recuperar cuentas','s1d':'Apoyo conforme a las plataformas para cuentas propias o gestionadas con autorización.','s2':'Respuesta a riesgos digitales','s2d':'Clasificación de incidentes, organización de pruebas y próximos pasos ante actividad sospechosa.','s3':'Asesoría de cumplimiento','s3d':'Preparación de políticas, verificación de identidad y documentación de gobernanza.','s4':'Revisión de seguridad','s4d':'Higiene de cuentas, control de acceso y prevención.','process':'EL MÉTODO','process_title':'Claridad. Control. Cierre.','p1':'Comprender','p1d':'Definimos el problema y confirmamos autorización.','p2':'Evaluar','p2d':'Revisamos pruebas, riesgos y procesos oficiales.','p3':'Actuar','p3d':'Sigues un plan claro y documentado.','p4':'Reforzar','p4d':'Reducimos la posibilidad de recurrencia.','about_title':'Recuperación digital sin atajos.','about_desc':'YAKUZA ofrece consultoría independiente y asistencia legítima autorizada por el propietario. Nunca pedimos contraseñas, códigos de un solo uso ni acceso remoto.','contact_title':'Definamos el siguiente paso.','contact_desc':'Cuéntanos qué ocurrió. No incluyas contraseñas, códigos, claves de recuperación ni documentos sensibles.','form_name':'Tu nombre','form_email':'Correo electrónico','form_topic':'¿Qué necesitas?','form_message':'Describe brevemente la situación','form_submit':'Enviar consulta segura','topic_recovery':'Orientación de recuperación','topic_risk':'Respuesta a riesgos digitales','topic_compliance':'Asesoría de cumplimiento','topic_other':'Otra consulta','footer_note':'Consultoría independiente, sin afiliación a plataformas.','privacy':'Privacidad','admin':'Portal del equipo','sent':'Hemos recibido tu consulta.','back':'Volver al inicio','login':'Acceso del equipo','username':'Usuario','password':'Contraseña','sign_in':'Entrar','dashboard':'Panel de consultas','logout':'Salir','case':'Caso','status_label':'Estado','new':'Nuevo','reviewing':'En revisión','closed':'Cerrado','update':'Actualizar','no_cases':'Aún no hay consultas.','disclaimer':'YAKUZA no garantiza la restauración de cuentas. El titular debe usar los canales oficiales.','privacy_title':'Privacidad y datos','privacy_text':'Usamos los datos para responder y proteger el servicio. No envíes contraseñas, códigos, claves de recuperación ni datos bancarios.','loading':'INICIANDO INTERFAZ SEGURA','loading_sub':'ESTABLECIENDO SESIÓN','menu':'Abrir menú'},
+'de': {'name':'Deutsch','dir':'ltr','nav_home':'Start','nav_services':'Leistungen','nav_about':'Über uns','nav_contact':'Kontakt','eyebrow':'DIGITALES VERTRAUEN • WIEDERHERSTELLUNG • COMPLIANCE','hero_a':'HOLEN SIE','hero_b':'DIE KONTROLLE','hero_c':'ZURÜCK.','hero_desc':'Beratung zur Kontowiederherstellung, Reaktion auf digitale Risiken und Compliance — mit Fokus auf Eigentum und Datenschutz.','cta_primary':'Sichere Anfrage starten','cta_secondary':'Leistungen entdecken','scroll':'WEITER ENTDECKEN','status':'SYSTEME ONLINE','trusted':'KLARHEIT IN DIGITALER KOMPLEXITÄT','services_title':'Präzision, wenn es darauf ankommt.','services_desc':'Ein klarer, dokumentierter Prozess für komplexe digitale Herausforderungen.','s1':'Beratung zur Kontowiederherstellung','s1d':'Plattformkonforme Unterstützung für eigene oder autorisiert verwaltete Konten.','s2':'Reaktion auf digitale Risiken','s2d':'Vorfallbewertung, Beweissicherung und nächste Schritte bei verdächtigen Aktivitäten.','s3':'Compliance-Beratung','s3d':'Richtlinien, Identitätsprüfung und Governance-Dokumentation.','s4':'Sicherheitsprüfung','s4d':'Kontohygiene, Zugriffskontrolle und Prävention.','process':'DER ANSATZ','process_title':'Klarheit. Kontrolle. Abschluss.','p1':'Verstehen','p1d':'Problem eingrenzen und Berechtigung bestätigen.','p2':'Bewerten','p2d':'Belege, Risiken und Plattformprozesse prüfen.','p3':'Handeln','p3d':'Einem klaren Maßnahmenplan folgen.','p4':'Stärken','p4d':'Wiederholungsrisiken reduzieren.','about_title':'Digitale Wiederherstellung ohne Abkürzungen.','about_desc':'YAKUZA ist eine unabhängige Beratung für legitime, vom Eigentümer autorisierte Unterstützung. Wir fragen niemals nach Passwörtern, Einmalcodes oder Fernzugriff.','contact_title':'Planen wir den nächsten Schritt.','contact_desc':'Beschreiben Sie den Vorfall. Keine Passwörter, Codes, Wiederherstellungsschlüssel oder sensiblen Ausweisdokumente senden.','form_name':'Ihr Name','form_email':'E-Mail','form_topic':'Wobei benötigen Sie Hilfe?','form_message':'Situation kurz beschreiben','form_submit':'Sichere Anfrage senden','topic_recovery':'Kontowiederherstellung','topic_risk':'Digitale Risikoreaktion','topic_compliance':'Compliance-Beratung','topic_other':'Sonstige Anfrage','footer_note':'Unabhängige Beratung, keine Plattformzugehörigkeit.','privacy':'Datenschutz','admin':'Teamportal','sent':'Ihre Anfrage ist eingegangen.','back':'Zur Startseite','login':'Team-Anmeldung','username':'Benutzername','password':'Passwort','sign_in':'Anmelden','dashboard':'Anfragenübersicht','logout':'Abmelden','case':'Anfrage','status_label':'Status','new':'Neu','reviewing':'In Prüfung','closed':'Geschlossen','update':'Aktualisieren','no_cases':'Noch keine Anfragen.','disclaimer':'YAKUZA garantiert keine Kontowiederherstellung. Eigentümer müssen offizielle Plattformkanäle nutzen.','privacy_title':'Datenschutz und Daten','privacy_text':'Angaben werden zur Beantwortung und zum Schutz des Dienstes verwendet. Keine Passwörter, Codes, Wiederherstellungsschlüssel oder Zahlungsdaten senden.','loading':'SICHERE OBERFLÄCHE WIRD GESTARTET','loading_sub':'SITZUNG WIRD AUFGEBAUT','menu':'Menü öffnen'},
+'it': {'name':'Italiano','dir':'ltr','nav_home':'Home','nav_services':'Servizi','nav_about':'Chi siamo','nav_contact':'Contatti','eyebrow':'FIDUCIA DIGITALE • RECUPERO • CONFORMITÀ','hero_a':'RIPRENDI','hero_b':'IL TUO CONTROLLO','hero_c':'DIGITALE.','hero_desc':'Consulenza per il recupero account, risposta ai rischi digitali e conformità, nel rispetto della proprietà e della privacy.','cta_primary':'Avvia una richiesta sicura','cta_secondary':'Scopri i servizi','scroll':'SCORRI PER ESPLORARE','status':'SISTEMI ONLINE','trusted':'PIÙ CHIAREZZA NELLA COMPLESSITÀ DIGITALE','services_title':'Precisione quando serve.','services_desc':'Un processo chiaro e documentato per sfide digitali complesse.','s1':'Consulenza recupero account','s1d':'Supporto conforme alle piattaforme per account di tua proprietà o gestiti con autorizzazione.','s2':'Risposta ai rischi digitali','s2d':'Valutazione incidenti, organizzazione prove e passaggi successivi dopo attività sospette.','s3':'Consulenza conformità','s3d':'Preparazione alle policy, verifica identità e documentazione governance.','s4':'Revisione sicurezza','s4d':'Igiene degli account, controllo accessi e prevenzione.','process':'IL METODO','process_title':'Chiarezza. Controllo. Soluzione.','p1':'Comprendere','p1d':'Definire il problema e confermare l’autorizzazione.','p2':'Valutare','p2d':'Mappare prove, rischi e procedure della piattaforma.','p3':'Agire','p3d':'Seguire un piano d’azione documentato.','p4':'Rafforzare','p4d':'Ridurre il rischio di nuovi incidenti.','about_title':'Recupero digitale senza scorciatoie.','about_desc':'YAKUZA è una consulenza indipendente per supporto legittimo e autorizzato dal proprietario. Non chiediamo mai password, codici temporanei o accesso remoto.','contact_title':'Definiamo il prossimo passo.','contact_desc':'Descrivi cosa è successo. Non includere password, codici, chiavi di recupero o documenti sensibili.','form_name':'Nome','form_email':'Email','form_topic':'Di cosa hai bisogno?','form_message':'Descrivi brevemente la situazione','form_submit':'Invia richiesta sicura','topic_recovery':'Consulenza recupero account','topic_risk':'Risposta ai rischi digitali','topic_compliance':'Consulenza conformità','topic_other':'Altra richiesta','footer_note':'Consulenza indipendente, non affiliata alle piattaforme.','privacy':'Privacy','admin':'Portale team','sent':'La richiesta è stata ricevuta.','back':'Torna alla home','login':'Accesso team','username':'Nome utente','password':'Password','sign_in':'Accedi','dashboard':'Dashboard richieste','logout':'Esci','case':'Caso','status_label':'Stato','new':'Nuovo','reviewing':'In revisione','closed':'Chiuso','update':'Aggiorna','no_cases':'Nessuna richiesta.','disclaimer':'YAKUZA non garantisce il ripristino degli account. Il proprietario deve usare i canali ufficiali.','privacy_title':'Privacy e dati','privacy_text':'Usiamo i dati per rispondere e proteggere il servizio. Non inviare password, codici, chiavi di recupero o dati di pagamento.','loading':'AVVIO INTERFACCIA SICURA','loading_sub':'CREAZIONE SESSIONE','menu':'Apri menu'}
+}
+
+
+# Additional localized interfaces. English remains the fallback for non-translated legal text.
+LANGS.update({
+'pt': {'name':'Português','dir':'ltr','nav_home':'Início','nav_services':'Serviços','nav_about':'Sobre','nav_contact':'Contato','eyebrow':'CONFIANÇA DIGITAL • RECUPERAÇÃO • CONFORMIDADE','hero_a':'REASSUMA','hero_b':'O CONTROLE','hero_c':'DIGITAL.','hero_desc':'Orientação para recuperação de contas, resposta a riscos digitais e consultoria de conformidade, respeitando sua propriedade e privacidade.','cta_primary':'Iniciar solicitação segura','cta_secondary':'Explorar serviços','scroll':'ROLE PARA EXPLORAR','status':'SISTEMAS ONLINE','trusted':'UM CAMINHO MAIS CLARO NA COMPLEXIDADE DIGITAL','services_title':'Precisão quando importa.','services_desc':'Um processo claro e documentado para desafios digitais complexos.','s1':'Orientação para recuperação de contas','s1d':'Suporte alinhado às plataformas para contas próprias ou geridas com autorização.','s2':'Resposta a riscos digitais','s2d':'Triagem de incidentes, organização de evidências e próximos passos após atividade suspeita.','s3':'Consultoria de conformidade','s3d':'Preparação para políticas, verificação de identidade e documentação de governança.','s4':'Revisão de segurança','s4d':'Boas práticas de conta, controle de acesso e prevenção.','process':'O MÉTODO','process_title':'Clareza. Controle. Resolução.','p1':'Entender','p1d':'Definir o problema e confirmar autorização.','p2':'Avaliar','p2d':'Mapear evidências, riscos e processos da plataforma.','p3':'Agir','p3d':'Seguir um plano de ação documentado.','p4':'Fortalecer','p4d':'Reduzir o risco de recorrência.','about_title':'Recuperação digital sem atalhos.','about_desc':'A YAKUZA é uma consultoria independente focada em suporte legítimo e autorizado pelo titular. Nunca solicitamos senhas, códigos temporários ou acesso remoto.','contact_title':'Vamos definir o próximo passo.','contact_desc':'Conte o que aconteceu. Não inclua senhas, códigos, chaves de recuperação ou documentos sensíveis.','form_name':'Seu nome','form_email':'E-mail','form_topic':'Como podemos ajudar?','form_message':'Descreva brevemente a situação','form_submit':'Enviar solicitação segura','topic_recovery':'Orientação para recuperação','topic_risk':'Resposta a riscos digitais','topic_compliance':'Consultoria de conformidade','topic_other':'Outra solicitação','footer_note':'Consultoria independente, sem vínculo com plataformas.','privacy':'Privacidade','admin':'Portal da equipe','sent':'Sua solicitação foi recebida.','back':'Voltar ao início','login':'Acesso da equipe','username':'Usuário','password':'Senha','sign_in':'Entrar','dashboard':'Painel de solicitações','logout':'Sair','case':'Caso','status_label':'Status','new':'Novo','reviewing':'Em análise','closed':'Fechado','update':'Atualizar','no_cases':'Ainda não há solicitações.','disclaimer':'A YAKUZA não garante a restauração de contas. O titular deve usar os canais oficiais da plataforma.','privacy_title':'Privacidade e dados','privacy_text':'Usamos os dados para responder às solicitações e proteger o serviço. Não envie senhas, códigos, chaves de recuperação ou dados bancários.','loading':'INICIALIZANDO INTERFACE SEGURA','loading_sub':'ESTABELECENDO SESSÃO','menu':'Abrir menu'},
+'tr': {'name':'Türkçe','dir':'ltr','nav_home':'Ana Sayfa','nav_services':'Hizmetler','nav_about':'Hakkımızda','nav_contact':'İletişim','eyebrow':'DİJİTAL GÜVEN • KURTARMA • UYUM','hero_a':'DİJİTAL','hero_b':'KONTROLÜNÜ','hero_c':'GERİ AL.','hero_desc':'Hesap kurtarma rehberliği, dijital risk müdahalesi ve uyum danışmanlığı; mülkiyetinize ve gizliliğinize saygıyla.','cta_primary':'Güvenli talep başlat','cta_secondary':'Hizmetleri keşfet','scroll':'KEŞFETMEK İÇİN KAYDIR','status':'SİSTEMLER ÇEVRİMİÇİ','trusted':'DİJİTAL KARMAŞADA DAHA NET BİR YOL','services_title':'Önemli anlarda hassasiyet.','services_desc':'Karmaşık dijital sorunlar için açık ve belgeli süreç.','s1':'Hesap kurtarma rehberliği','s1d':'Sahibi olduğunuz veya yetkiyle yönettiğiniz hesaplar için platform kurallarına uygun destek.','s2':'Dijital risk müdahalesi','s2d':'Şüpheli etkinlik sonrası olay değerlendirmesi, kanıt düzenleme ve sonraki adımlar.','s3':'Uyum danışmanlığı','s3d':'Politika hazırlığı, kimlik doğrulama ve yönetişim belgeleri.','s4':'Güvenlik değerlendirmesi','s4d':'Hesap güvenliği, erişim kontrolü ve önleme önerileri.','process':'YÖNTEM','process_title':'Netlik. Kontrol. Çözüm.','p1':'Anla','p1d':'Sorunu tanımla ve yetkiyi doğrula.','p2':'Değerlendir','p2d':'Kanıtları, riskleri ve platform süreçlerini incele.','p3':'Harekete geç','p3d':'Belgelenmiş bir eylem planını izle.','p4':'Güçlendir','p4d':'Tekrarlama riskini azalt.','about_title':'Kestirme yol olmadan dijital kurtarma.','about_desc':'YAKUZA, hesap sahibinin yetkilendirdiği meşru desteğe odaklanan bağımsız bir danışmanlıktır. Şifre, tek kullanımlık kod veya uzaktan erişim istemeyiz.','contact_title':'Sonraki adımı birlikte belirleyelim.','contact_desc':'Ne olduğunu anlatın. Şifre, doğrulama kodu, kurtarma anahtarı veya hassas belge göndermeyin.','form_name':'Adınız','form_email':'E-posta','form_topic':'Hangi konuda yardım?','form_message':'Durumu kısaca açıklayın','form_submit':'Güvenli talep gönder','topic_recovery':'Hesap kurtarma rehberliği','topic_risk':'Dijital risk müdahalesi','topic_compliance':'Uyum danışmanlığı','topic_other':'Diğer talep','footer_note':'Bağımsız danışmanlık; platformlarla bağlantısı yoktur.','privacy':'Gizlilik','admin':'Ekip portalı','sent':'Talebiniz alındı.','back':'Ana sayfaya dön','login':'Ekip girişi','username':'Kullanıcı adı','password':'Şifre','sign_in':'Giriş yap','dashboard':'Talep paneli','logout':'Çıkış','case':'Dosya','status_label':'Durum','new':'Yeni','reviewing':'İnceleniyor','closed':'Kapalı','update':'Güncelle','no_cases':'Henüz talep yok.','disclaimer':'YAKUZA hesap kurtarmayı garanti etmez. Tüm işlemler hesap sahibi tarafından resmî platform kanallarından yapılmalıdır.','privacy_title':'Gizlilik ve veri','privacy_text':'Bilgileri talepleri yanıtlamak ve hizmeti korumak için kullanırız. Şifre, kod, kurtarma anahtarı veya ödeme bilgisi göndermeyin.','loading':'GÜVENLİ ARAYÜZ BAŞLATILIYOR','loading_sub':'OTURUM OLUŞTURULUYOR','menu':'Menüyü aç'},
+'zh': {'name':'简体中文','dir':'ltr','nav_home':'首页','nav_services':'服务','nav_about':'关于我们','nav_contact':'联系','eyebrow':'数字信任 • 账户恢复 • 合规','hero_a':'重新掌握','hero_b':'数字世界','hero_c':'主动权。','hero_desc':'提供账户恢复指导、数字风险响应和合规咨询，尊重您的账户所有权与隐私。','cta_primary':'提交安全请求','cta_secondary':'探索服务','scroll':'向下探索','status':'系统在线','trusted':'让复杂数字问题更清晰','services_title':'关键时刻，精准应对。','services_desc':'以清晰、可记录的流程处理复杂数字挑战。','s1':'账户恢复指导','s1d':'针对您拥有或获授权管理的账户，提供符合平台规则的支持。','s2':'数字风险响应','s2d':'可疑活动后的事件分级、证据整理与后续建议。','s3':'合规咨询','s3d':'平台政策准备、身份验证准备和治理文档。','s4':'安全状况评估','s4d':'账户安全、访问控制和预防建议。','process':'工作方法','process_title':'清晰。掌控。解决。','p1':'了解','p1d':'明确问题并确认授权。','p2':'评估','p2d':'梳理证据、风险和平台流程。','p3':'行动','p3d':'遵循清晰且有记录的行动计划。','p4':'强化','p4d':'降低问题再次发生的风险。','about_title':'数字恢复，不走捷径。','about_desc':'YAKUZA 是独立的数字恢复与合规咨询机构，只提供合法且经账户所有者授权的支持。我们绝不会索要密码、一次性验证码或远程访问权限。','contact_title':'一起规划下一步。','contact_desc':'请描述发生的情况。请勿提供密码、验证码、恢复密钥或敏感身份证件。','form_name':'姓名','form_email':'电子邮箱','form_topic':'需要哪类帮助？','form_message':'简要描述情况','form_submit':'发送安全请求','topic_recovery':'账户恢复指导','topic_risk':'数字风险响应','topic_compliance':'合规咨询','topic_other':'其他咨询','footer_note':'独立咨询机构，与社交平台无关联。','privacy':'隐私','admin':'团队入口','sent':'已收到您的请求。','back':'返回首页','login':'团队登录','username':'用户名','password':'密码','sign_in':'登录','dashboard':'请求管理','logout':'退出','case':'请求','status_label':'状态','new':'新建','reviewing':'审核中','closed':'已关闭','update':'更新','no_cases':'暂无请求。','disclaimer':'YAKUZA 不保证账户恢复。所有恢复操作必须由账户所有者通过平台官方渠道完成。','privacy_title':'隐私与数据处理','privacy_text':'我们仅使用请求信息来回复咨询并维护服务安全。请勿提交密码、验证码、恢复密钥或银行卡信息。','loading':'正在初始化安全界面','loading_sub':'正在建立会话','menu':'打开菜单'},
+'ja': {'name':'日本語','dir':'ltr','nav_home':'ホーム','nav_services':'サービス','nav_about':'私たちについて','nav_contact':'お問い合わせ','eyebrow':'デジタル信頼 • 復旧支援 • コンプライアンス','hero_a':'デジタルの','hero_b':'主導権を','hero_c':'取り戻す。','hero_desc':'アカウント復旧のガイダンス、デジタルリスク対応、コンプライアンス相談を、所有権とプライバシーを尊重して提供します。','cta_primary':'安全な相談を開始','cta_secondary':'サービスを見る','scroll':'スクロールして探索','status':'システム稼働中','trusted':'複雑なデジタル課題を、より明確に','services_title':'重要な場面で、的確に。','services_desc':'複雑なデジタル課題に対する明確で記録可能なプロセス。','s1':'アカウント復旧ガイダンス','s1d':'本人所有または正当な権限のあるアカウントに対する、プラットフォーム規約に沿った支援。','s2':'デジタルリスク対応','s2d':'不審な活動後のインシデント評価、証拠整理、次の対応策。','s3':'コンプライアンス相談','s3d':'ポリシー対応、本人確認の準備、ガバナンス文書。','s4':'セキュリティ評価','s4d':'アカウント衛生、アクセス管理、予防策の提案。','process':'進め方','process_title':'明確に。確実に。解決へ。','p1':'把握','p1d':'課題を整理し、権限を確認します。','p2':'評価','p2d':'証拠、リスク、プラットフォームの手順を確認します。','p3':'実行','p3d':'明確で記録された計画に沿って進めます。','p4':'強化','p4d':'再発リスクの低減を支援します。','about_title':'近道に頼らないデジタル復旧。','about_desc':'YAKUZA は、所有者の許可に基づく正当な支援を行う独立系コンサルティングです。パスワード、ワンタイムコード、遠隔アクセスを求めることはありません。','contact_title':'次の一歩を一緒に考えましょう。','contact_desc':'状況をお知らせください。パスワード、認証コード、復旧キー、機密性の高い本人確認書類は送信しないでください。','form_name':'お名前','form_email':'メールアドレス','form_topic':'ご相談内容','form_message':'状況を簡潔にご記入ください','form_submit':'安全な問い合わせを送信','topic_recovery':'アカウント復旧ガイダンス','topic_risk':'デジタルリスク対応','topic_compliance':'コンプライアンス相談','topic_other':'その他のお問い合わせ','footer_note':'独立したコンサルティングであり、各プラットフォームとは無関係です。','privacy':'プライバシー','admin':'チームポータル','sent':'お問い合わせを受け付けました。','back':'ホームに戻る','login':'チームログイン','username':'ユーザー名','password':'パスワード','sign_in':'ログイン','dashboard':'問い合わせ管理','logout':'ログアウト','case':'案件','status_label':'ステータス','new':'新規','reviewing':'確認中','closed':'完了','update':'更新','no_cases':'問い合わせはまだありません。','disclaimer':'YAKUZA はアカウント復旧を保証しません。すべての復旧操作は所有者が公式窓口を通じて行う必要があります。','privacy_title':'プライバシーとデータ','privacy_text':'お問い合わせへの対応とサービス保護のために情報を使用します。パスワード、認証コード、復旧キー、決済情報は送信しないでください。','loading':'セキュア画面を初期化中','loading_sub':'セッションを確立中','menu':'メニューを開く'}
+})
+
+LANGS['ar-tn']={**LANGS['ar'], 'name':'تونسي / العربية', 'nav_home':'الرئيسية', 'nav_services':'شنوة نقدّمو', 'nav_about':'علينا', 'nav_contact':'اتصل بينا', 'contact_title':'احكيلنا شنوة صار', 'contact_desc':'عمّر الطلب بالتفاصيل الضرورية، وما تبعثش كلمة السر ولا كود التثبّت.', 'form_name':'اسمك', 'form_email':'الإيميل متاعك', 'form_topic':'نوع المشكلة', 'form_message':'فسّرنا باختصار شنوة صار', 'form_submit':'ابعث الطلب بأمان', 'sent':'وصلنا طلبك، ونعطيوه رقم متابعة.', 'dashboard':'طلبات الحرفاء', 'no_cases':'ما فما حتى طلب توّة.', 'login':'دخول الفريق', 'username':'اسم المستخدم', 'password':'كلمة السر', 'sign_in':'ادخل', 'logout':'اخرج', 'privacy':'الخصوصية'}
+
+class InquiryForm(FlaskForm):
+    name=StringField(validators=[DataRequired(),Length(min=2,max=100)])
+    email=EmailField(validators=[DataRequired(),Email(),Length(max=180)])
+    topic=SelectField(choices=[('recovery','Account recovery'),('risk','Digital risk response'),('compliance','Compliance advisory'),('other','Other')], validators=[DataRequired()])
+    message=TextAreaField(validators=[DataRequired(),Length(min=25,max=3000)])
+    incident_date=StringField(validators=[Optional(),Length(max=30)])
+    account_handle=StringField(validators=[Optional(),Length(max=120)])
+    evidence_url=StringField(validators=[Optional(),Length(max=500)])
+    urgency=SelectField(choices=[('normal','Normal'),('high','High'),('critical','Critical')],validators=[DataRequired()])
+    human_answer=StringField(validators=[DataRequired(),Length(max=4)])
+    authorization=StringField(validators=[DataRequired()])
+    phone=StringField(validators=[Optional(),Length(max=40)])
+    platform=SelectField(choices=[('not-specified','Not specified'),('instagram','Instagram'),('facebook','Facebook'),('tiktok','TikTok'),('google','Google'),('x','X'),('linkedin','LinkedIn'),('other','Other')], validators=[DataRequired()])
+    contact_method=SelectField(choices=[('support','Contact support'),('whatsapp','Continue on WhatsApp')], validators=[DataRequired()])
+    website=StringField(validators=[Optional(),Length(max=0)])
+    submit=SubmitField()
+class LoginForm(FlaskForm):
+    username=StringField(validators=[DataRequired(),Length(max=80)])
+    password=PasswordField(validators=[DataRequired(),Length(max=200)])
+
+class Inquiry(db.Model):
+    id=db.Column(db.Integer,primary_key=True)
+    name=db.Column(db.String(100),nullable=False)
+    email=db.Column(db.String(180),nullable=False,index=True)
+    topic=db.Column(db.String(40),nullable=False)
+    message=db.Column(db.Text,nullable=False)
+    status=db.Column(db.String(20),nullable=False,default='new')
+    created_at=db.Column(db.DateTime,nullable=False,default=lambda:datetime.now(timezone.utc))
+    case_ref=db.Column(db.String(32),unique=True,index=True)
+    platform=db.Column(db.String(40),default='not-specified')
+    phone=db.Column(db.String(40),default='')
+    incident_date=db.Column(db.String(30),default='')
+    account_handle=db.Column(db.String(120),default='')
+    evidence_url=db.Column(db.String(500),default='')
+    urgency=db.Column(db.String(20),default='normal')
+    risk_score=db.Column(db.Integer,default=0)
+    risk_flags=db.Column(db.Text,default='')
+    triage_report=db.Column(db.Text,default='')
+    contact_method=db.Column(db.String(20),default='support')
+class AdminUser(db.Model):
+    id=db.Column(db.Integer,primary_key=True)
+    username=db.Column(db.String(80),unique=True,nullable=False)
+    password_hash=db.Column(db.String(255),nullable=False)
+
+def tr(key): return LANGS.get(session.get('lang','en'),LANGS['en']).get(key,LANGS['en'].get(key,key))
+@app.context_processor
+def inject():
+    lang=session.get('lang','en'); return {'t':tr,'lang':lang,'languages':LANGS,'direction':LANGS.get(lang,LANGS['en'])['dir']}
+@app.before_request
+def language_and_security():
+    if request.args.get('lang') in LANGS:
+        session['lang']=request.args['lang']
+        return redirect(request.path)
+@app.after_request
+def security_headers(resp):
+    if request.path == ADMIN_URL_PREFIX or request.path.startswith(ADMIN_URL_PREFIX + '/'):
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
+    resp.headers['X-Content-Type-Options']='nosniff'; resp.headers['X-Frame-Options']='DENY'; resp.headers['Referrer-Policy']='strict-origin-when-cross-origin'; resp.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
+    resp.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+    if app.config['SESSION_COOKIE_SECURE']: resp.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
+    return resp
+@app.get('/')
+def home(): return render_template('index.html')
+@app.get('/services')
+def services(): return render_template('services.html')
+@app.get('/about')
+def about(): return render_template('about.html')
+@app.route('/contact',methods=['GET','POST'])
+@limiter.limit('5 per hour',methods=['POST'])
+def contact():
+    form=InquiryForm()
+    if 'human_a' not in session:
+        a,b=random.randint(2,9),random.randint(1,9); session['human_a']=a; session['human_b']=b
+    human_question=f"{session['human_a']} + {session['human_b']}"
+    if form.validate_on_submit():
+        if form.website.data: abort(400)
+        expected=str(session.get('human_a',-100)+session.get('human_b',-100))
+        if not secrets.compare_digest(form.human_answer.data.strip(),expected):
+            flash('Human verification failed. Please solve the new check and try again.','error')
+            a,b=random.randint(2,9),random.randint(1,9); session['human_a']=a; session['human_b']=b
+            return render_template('contact.html',form=form,human_question=f"{a} + {b}")
+        if form.authorization.data != 'yes': abort(400)
+        if form.evidence_url.data and not re.match(r'^https://',form.evidence_url.data.strip(),re.I):
+            form.evidence_url.errors.append('Evidence link must begin with https://')
+            return render_template('contact.html',form=form,human_question=human_question)
+        message=form.message.data.strip()
+        # Heuristic triage flags are review prompts, never a verdict about a person or organization.
+        patterns=[('credential_request',r'password|one.time code|otp|2fa code|recovery code'),('guaranteed_recovery_claim',r'guaranteed recovery|100% recovery|instant recovery'),('off_platform_payment_pressure',r'pay.*crypto|gift card|wire transfer|urgent payment')]
+        flags=[label for label,pat in patterns if re.search(pat,message,re.I)]
+        score=min(90,len(flags)*25 + (20 if form.urgency.data=='critical' else 10 if form.urgency.data=='high' else 0))
+        report=("Automated intake triage — review required, not a fraud determination.\n"
+                f"Priority: {form.urgency.data.upper()}\nRisk indicators: {', '.join(flags) if flags else 'No configured text indicators detected'}\n"
+                "Recommended checks: confirm account ownership through official platform channels; inspect timestamps and original notifications; preserve unedited evidence; never request passwords, OTPs, recovery keys, or remote access.\n"
+                "Limitations: text heuristics can produce false positives and false negatives. A human reviewer must assess context.")
+        ref='YKZ-'+datetime.now(timezone.utc).strftime('%y%m%d')+'-'+uuid.uuid4().hex[:6].upper()
+        details=message+"\n\nPlatform: "+form.platform.data
+        item=Inquiry(case_ref=ref,name=form.name.data.strip(),email=form.email.data.strip().lower(),topic=form.topic.data,message=details,
+            platform=form.platform.data,phone=form.phone.data.strip(),incident_date=form.incident_date.data.strip(),
+            account_handle=form.account_handle.data.strip(),evidence_url=form.evidence_url.data.strip(),urgency=form.urgency.data,
+            risk_score=score,risk_flags=', '.join(flags),triage_report=report,contact_method=form.contact_method.data)
+        db.session.add(item); db.session.commit(); session.pop('human_a',None); session.pop('human_b',None)
+        if form.contact_method.data=='whatsapp':
+            number=''.join(ch for ch in os.environ.get('WHATSAPP_NUMBER','') if ch.isdigit())
+            if number:
+                text_message=f"YAKUZA case {ref}\nName: {item.name}\nEmail: {item.email}\nPlatform: {item.platform}\nIssue: {message[:1200]}\nPlease do not send passwords or verification codes."
+                return redirect('https://wa.me/'+number+'?text='+quote(text_message,safe=''))
+        return render_template('submitted.html',item=item)
+    return render_template('contact.html',form=form,human_question=human_question)
+@app.get('/privacy')
+def privacy(): return render_template('privacy.html')
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*a,**kw):
+        admin_id = session.get('admin_id')
+        if not admin_id or not db.session.get(AdminUser, admin_id):
+            session.clear()
+            return redirect(url_for('admin_login'))
+        return fn(*a,**kw)
+    return wrapper
+@app.route(ADMIN_URL_PREFIX + '/login',methods=['GET','POST'])
+@limiter.limit('8 per hour',methods=['POST'])
+def admin_login():
+    form=LoginForm()
+    if form.validate_on_submit():
+        user=AdminUser.query.filter_by(username=form.username.data.strip()).first()
+        if user and check_password_hash(user.password_hash,form.password.data):
+            session.clear(); session.permanent=True; session['admin_id']=user.id; session['lang']='en'; return redirect(url_for('admin_dashboard'))
+        flash('Invalid credentials.','error')
+    return render_template('admin_login.html',form=form)
+@app.get(ADMIN_URL_PREFIX)
+@admin_required
+def admin_dashboard(): return render_template('admin.html',items=Inquiry.query.order_by(desc(Inquiry.created_at)).limit(250).all())
+@app.get(ADMIN_URL_PREFIX + '/case/<int:case_id>')
+@admin_required
+def case_detail(case_id):
+    item=Inquiry.query.get_or_404(case_id)
+    return render_template('case_detail.html',item=item)
+@app.get(ADMIN_URL_PREFIX + '/export.csv')
+@admin_required
+def export_inquiries():
+    output=io.StringIO(newline='')
+    writer=csv.writer(output)
+    writer.writerow(['case_id','case_reference','name','email','topic','platform','urgency','risk_score','risk_flags','message','status','created_at_utc'])
+    for item in Inquiry.query.order_by(desc(Inquiry.created_at)).all():
+        writer.writerow([item.id,item.case_ref,item.name,item.email,item.topic,item.platform,item.urgency,item.risk_score,item.risk_flags,item.message,item.status,item.created_at.isoformat()])
+    return Response('\ufeff'+output.getvalue(),mimetype='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename=yakuza-inquiries.csv','Cache-Control':'no-store'})
+@app.post(ADMIN_URL_PREFIX + '/case/<int:case_id>')
+@admin_required
+def update_case(case_id):
+    item=Inquiry.query.get_or_404(case_id); status=request.form.get('status')
+    if status not in ('new','reviewing','closed'): abort(400)
+    item.status=status; db.session.commit(); flash('Case status updated.','success'); return redirect(url_for('admin_dashboard'))
+@app.post(ADMIN_URL_PREFIX + '/logout')
+@admin_required
+def admin_logout(): session.clear(); return redirect(url_for('home'))
+@app.get('/health')
+def health(): return {'status':'ok','service':'yakuza'},200
+with app.app_context():
+    db.create_all()
+    # Additive migration for existing SQLite/PostgreSQL deployments.
+    from sqlalchemy import inspect, text
+    cols={c['name'] for c in inspect(db.engine).get_columns('inquiry')}
+    additions={'case_ref':'VARCHAR(32)','platform':"VARCHAR(40) DEFAULT 'not-specified'",'phone':"VARCHAR(40) DEFAULT ''",'incident_date':"VARCHAR(30) DEFAULT ''",'account_handle':"VARCHAR(120) DEFAULT ''",'evidence_url':"VARCHAR(500) DEFAULT ''",'urgency':"VARCHAR(20) DEFAULT 'normal'",'risk_score':'INTEGER DEFAULT 0','risk_flags':"TEXT DEFAULT ''",'triage_report':"TEXT DEFAULT ''",'contact_method':"VARCHAR(20) DEFAULT 'support'"}
+    for col,definition in additions.items():
+        if col not in cols: db.session.execute(text(f'ALTER TABLE inquiry ADD COLUMN {col} {definition}'))
+    db.session.commit()
+    username=os.environ.get('ADMIN_USERNAME'); password=os.environ.get('ADMIN_PASSWORD')
+    if username and password and len(password)>=14:
+        admin=AdminUser.query.filter_by(username=username).first()
+        if admin is None:
+            db.session.add(AdminUser(username=username,password_hash=generate_password_hash(password))); db.session.commit()
+        elif os.environ.get('RESET_ADMIN_PASSWORD') == '1':
+            admin.password_hash=generate_password_hash(password); db.session.commit()
+if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=False)
