@@ -1,4 +1,4 @@
-import os, secrets, csv, io
+import os, secrets, csv, io, re, uuid, random
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, make_response, Response
@@ -8,7 +8,7 @@ from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from wtforms import StringField, EmailField, SelectField, TextAreaField, PasswordField, SubmitField
-from wtforms.validators import DataRequired, Email, Length, Optional
+from wtforms.validators import DataRequired, Email, Length, Optional, Regexp
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import quote
 from sqlalchemy import desc
@@ -52,11 +52,19 @@ LANGS.update({
 'ja': {'name':'日本語','dir':'ltr','nav_home':'ホーム','nav_services':'サービス','nav_about':'私たちについて','nav_contact':'お問い合わせ','eyebrow':'デジタル信頼 • 復旧支援 • コンプライアンス','hero_a':'デジタルの','hero_b':'主導権を','hero_c':'取り戻す。','hero_desc':'アカウント復旧のガイダンス、デジタルリスク対応、コンプライアンス相談を、所有権とプライバシーを尊重して提供します。','cta_primary':'安全な相談を開始','cta_secondary':'サービスを見る','scroll':'スクロールして探索','status':'システム稼働中','trusted':'複雑なデジタル課題を、より明確に','services_title':'重要な場面で、的確に。','services_desc':'複雑なデジタル課題に対する明確で記録可能なプロセス。','s1':'アカウント復旧ガイダンス','s1d':'本人所有または正当な権限のあるアカウントに対する、プラットフォーム規約に沿った支援。','s2':'デジタルリスク対応','s2d':'不審な活動後のインシデント評価、証拠整理、次の対応策。','s3':'コンプライアンス相談','s3d':'ポリシー対応、本人確認の準備、ガバナンス文書。','s4':'セキュリティ評価','s4d':'アカウント衛生、アクセス管理、予防策の提案。','process':'進め方','process_title':'明確に。確実に。解決へ。','p1':'把握','p1d':'課題を整理し、権限を確認します。','p2':'評価','p2d':'証拠、リスク、プラットフォームの手順を確認します。','p3':'実行','p3d':'明確で記録された計画に沿って進めます。','p4':'強化','p4d':'再発リスクの低減を支援します。','about_title':'近道に頼らないデジタル復旧。','about_desc':'YAKUZA は、所有者の許可に基づく正当な支援を行う独立系コンサルティングです。パスワード、ワンタイムコード、遠隔アクセスを求めることはありません。','contact_title':'次の一歩を一緒に考えましょう。','contact_desc':'状況をお知らせください。パスワード、認証コード、復旧キー、機密性の高い本人確認書類は送信しないでください。','form_name':'お名前','form_email':'メールアドレス','form_topic':'ご相談内容','form_message':'状況を簡潔にご記入ください','form_submit':'安全な問い合わせを送信','topic_recovery':'アカウント復旧ガイダンス','topic_risk':'デジタルリスク対応','topic_compliance':'コンプライアンス相談','topic_other':'その他のお問い合わせ','footer_note':'独立したコンサルティングであり、各プラットフォームとは無関係です。','privacy':'プライバシー','admin':'チームポータル','sent':'お問い合わせを受け付けました。','back':'ホームに戻る','login':'チームログイン','username':'ユーザー名','password':'パスワード','sign_in':'ログイン','dashboard':'問い合わせ管理','logout':'ログアウト','case':'案件','status_label':'ステータス','new':'新規','reviewing':'確認中','closed':'完了','update':'更新','no_cases':'問い合わせはまだありません。','disclaimer':'YAKUZA はアカウント復旧を保証しません。すべての復旧操作は所有者が公式窓口を通じて行う必要があります。','privacy_title':'プライバシーとデータ','privacy_text':'お問い合わせへの対応とサービス保護のために情報を使用します。パスワード、認証コード、復旧キー、決済情報は送信しないでください。','loading':'セキュア画面を初期化中','loading_sub':'セッションを確立中','menu':'メニューを開く'}
 })
 
+LANGS['ar-tn']={**LANGS['ar'], 'name':'تونسي / العربية', 'nav_home':'الرئيسية', 'nav_services':'شنوة نقدّمو', 'nav_about':'علينا', 'nav_contact':'اتصل بينا', 'contact_title':'احكيلنا شنوة صار', 'contact_desc':'عمّر الطلب بالتفاصيل الضرورية، وما تبعثش كلمة السر ولا كود التثبّت.', 'form_name':'اسمك', 'form_email':'الإيميل متاعك', 'form_topic':'نوع المشكلة', 'form_message':'فسّرنا باختصار شنوة صار', 'form_submit':'ابعث الطلب بأمان', 'sent':'وصلنا طلبك، ونعطيوه رقم متابعة.', 'dashboard':'طلبات الحرفاء', 'no_cases':'ما فما حتى طلب توّة.', 'login':'دخول الفريق', 'username':'اسم المستخدم', 'password':'كلمة السر', 'sign_in':'ادخل', 'logout':'اخرج', 'privacy':'الخصوصية'}
+
 class InquiryForm(FlaskForm):
     name=StringField(validators=[DataRequired(),Length(min=2,max=100)])
     email=EmailField(validators=[DataRequired(),Email(),Length(max=180)])
     topic=SelectField(choices=[('recovery','Account recovery'),('risk','Digital risk response'),('compliance','Compliance advisory'),('other','Other')], validators=[DataRequired()])
-    message=TextAreaField(validators=[DataRequired(),Length(min=15,max=3000)])
+    message=TextAreaField(validators=[DataRequired(),Length(min=25,max=3000)])
+    incident_date=StringField(validators=[Optional(),Length(max=30)])
+    account_handle=StringField(validators=[Optional(),Length(max=120)])
+    evidence_url=StringField(validators=[Optional(),Length(max=500)])
+    urgency=SelectField(choices=[('normal','Normal'),('high','High'),('critical','Critical')],validators=[DataRequired()])
+    human_answer=StringField(validators=[DataRequired(),Length(max=4)])
+    authorization=StringField(validators=[DataRequired()])
     phone=StringField(validators=[Optional(),Length(max=40)])
     platform=SelectField(choices=[('not-specified','Not specified'),('instagram','Instagram'),('facebook','Facebook'),('tiktok','TikTok'),('google','Google'),('x','X'),('linkedin','LinkedIn'),('other','Other')], validators=[DataRequired()])
     contact_method=SelectField(choices=[('support','Contact support'),('whatsapp','Continue on WhatsApp')], validators=[DataRequired()])
@@ -74,6 +82,17 @@ class Inquiry(db.Model):
     message=db.Column(db.Text,nullable=False)
     status=db.Column(db.String(20),nullable=False,default='new')
     created_at=db.Column(db.DateTime,nullable=False,default=lambda:datetime.now(timezone.utc))
+    case_ref=db.Column(db.String(32),unique=True,index=True)
+    platform=db.Column(db.String(40),default='not-specified')
+    phone=db.Column(db.String(40),default='')
+    incident_date=db.Column(db.String(30),default='')
+    account_handle=db.Column(db.String(120),default='')
+    evidence_url=db.Column(db.String(500),default='')
+    urgency=db.Column(db.String(20),default='normal')
+    risk_score=db.Column(db.Integer,default=0)
+    risk_flags=db.Column(db.Text,default='')
+    triage_report=db.Column(db.Text,default='')
+    contact_method=db.Column(db.String(20),default='support')
 class AdminUser(db.Model):
     id=db.Column(db.Integer,primary_key=True)
     username=db.Column(db.String(80),unique=True,nullable=False)
@@ -108,21 +127,43 @@ def about(): return render_template('about.html')
 @limiter.limit('5 per hour',methods=['POST'])
 def contact():
     form=InquiryForm()
+    if 'human_a' not in session:
+        a,b=random.randint(2,9),random.randint(1,9); session['human_a']=a; session['human_b']=b
+    human_question=f"{session['human_a']} + {session['human_b']}"
     if form.validate_on_submit():
         if form.website.data: abort(400)
-        details = [f"Platform: {form.platform.data}"]
-        if form.phone.data.strip(): details.append(f"Phone: {form.phone.data.strip()}")
-        full_message = form.message.data.strip() + "\n\n" + "\n".join(details)
-        if form.contact_method.data == 'whatsapp':
-            number = ''.join(ch for ch in os.environ.get('WHATSAPP_NUMBER', '') if ch.isdigit())
-            if not number:
-                flash('WhatsApp contact is not configured yet. Please use Contact support or ask the site owner to set WHATSAPP_NUMBER.', 'error')
-                return render_template('contact.html',form=form)
-            text_message = (f"YAKUZA — New support request\nName: {form.name.data.strip()}\nEmail: {form.email.data.strip()}\nPlatform: {form.platform.data}\nTopic: {form.topic.data}\nPhone: {form.phone.data.strip() or 'Not provided'}\n\nDetails: {form.message.data.strip()}\n\nI confirm I am authorized to request assistance.")
-            return redirect('https://wa.me/' + number + '?text=' + quote(text_message, safe=''))
-        item=Inquiry(name=form.name.data.strip(),email=form.email.data.strip().lower(),topic=form.topic.data,message=full_message)
-        db.session.add(item); db.session.commit(); return render_template('submitted.html')
-    return render_template('contact.html',form=form)
+        expected=str(session.get('human_a',-100)+session.get('human_b',-100))
+        if not secrets.compare_digest(form.human_answer.data.strip(),expected):
+            flash('Human verification failed. Please solve the new check and try again.','error')
+            a,b=random.randint(2,9),random.randint(1,9); session['human_a']=a; session['human_b']=b
+            return render_template('contact.html',form=form,human_question=f"{a} + {b}")
+        if form.authorization.data != 'yes': abort(400)
+        if form.evidence_url.data and not re.match(r'^https://',form.evidence_url.data.strip(),re.I):
+            form.evidence_url.errors.append('Evidence link must begin with https://')
+            return render_template('contact.html',form=form,human_question=human_question)
+        message=form.message.data.strip()
+        # Heuristic triage flags are review prompts, never a verdict about a person or organization.
+        patterns=[('credential_request',r'password|one.time code|otp|2fa code|recovery code'),('guaranteed_recovery_claim',r'guaranteed recovery|100% recovery|instant recovery'),('off_platform_payment_pressure',r'pay.*crypto|gift card|wire transfer|urgent payment')]
+        flags=[label for label,pat in patterns if re.search(pat,message,re.I)]
+        score=min(90,len(flags)*25 + (20 if form.urgency.data=='critical' else 10 if form.urgency.data=='high' else 0))
+        report=("Automated intake triage — review required, not a fraud determination.\n"
+                f"Priority: {form.urgency.data.upper()}\nRisk indicators: {', '.join(flags) if flags else 'No configured text indicators detected'}\n"
+                "Recommended checks: confirm account ownership through official platform channels; inspect timestamps and original notifications; preserve unedited evidence; never request passwords, OTPs, recovery keys, or remote access.\n"
+                "Limitations: text heuristics can produce false positives and false negatives. A human reviewer must assess context.")
+        ref='YKZ-'+datetime.now(timezone.utc).strftime('%y%m%d')+'-'+uuid.uuid4().hex[:6].upper()
+        details=message+"\n\nPlatform: "+form.platform.data
+        item=Inquiry(case_ref=ref,name=form.name.data.strip(),email=form.email.data.strip().lower(),topic=form.topic.data,message=details,
+            platform=form.platform.data,phone=form.phone.data.strip(),incident_date=form.incident_date.data.strip(),
+            account_handle=form.account_handle.data.strip(),evidence_url=form.evidence_url.data.strip(),urgency=form.urgency.data,
+            risk_score=score,risk_flags=', '.join(flags),triage_report=report,contact_method=form.contact_method.data)
+        db.session.add(item); db.session.commit(); session.pop('human_a',None); session.pop('human_b',None)
+        if form.contact_method.data=='whatsapp':
+            number=''.join(ch for ch in os.environ.get('WHATSAPP_NUMBER','') if ch.isdigit())
+            if number:
+                text_message=f"YAKUZA case {ref}\nName: {item.name}\nEmail: {item.email}\nPlatform: {item.platform}\nIssue: {message[:1200]}\nPlease do not send passwords or verification codes."
+                return redirect('https://wa.me/'+number+'?text='+quote(text_message,safe=''))
+        return render_template('submitted.html',item=item)
+    return render_template('contact.html',form=form,human_question=human_question)
 @app.get('/privacy')
 def privacy(): return render_template('privacy.html')
 def admin_required(fn):
@@ -147,14 +188,19 @@ def admin_login():
 @app.get(ADMIN_URL_PREFIX)
 @admin_required
 def admin_dashboard(): return render_template('admin.html',items=Inquiry.query.order_by(desc(Inquiry.created_at)).limit(250).all())
+@app.get(ADMIN_URL_PREFIX + '/case/<int:case_id>')
+@admin_required
+def case_detail(case_id):
+    item=Inquiry.query.get_or_404(case_id)
+    return render_template('case_detail.html',item=item)
 @app.get(ADMIN_URL_PREFIX + '/export.csv')
 @admin_required
 def export_inquiries():
     output=io.StringIO(newline='')
     writer=csv.writer(output)
-    writer.writerow(['case_id','name','email','topic','message','status','created_at_utc'])
+    writer.writerow(['case_id','case_reference','name','email','topic','platform','urgency','risk_score','risk_flags','message','status','created_at_utc'])
     for item in Inquiry.query.order_by(desc(Inquiry.created_at)).all():
-        writer.writerow([item.id,item.name,item.email,item.topic,item.message,item.status,item.created_at.isoformat()])
+        writer.writerow([item.id,item.case_ref,item.name,item.email,item.topic,item.platform,item.urgency,item.risk_score,item.risk_flags,item.message,item.status,item.created_at.isoformat()])
     return Response('\ufeff'+output.getvalue(),mimetype='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename=yakuza-inquiries.csv','Cache-Control':'no-store'})
 @app.post(ADMIN_URL_PREFIX + '/case/<int:case_id>')
 @admin_required
@@ -169,7 +215,18 @@ def admin_logout(): session.clear(); return redirect(url_for('home'))
 def health(): return {'status':'ok','service':'yakuza'},200
 with app.app_context():
     db.create_all()
+    # Additive migration for existing SQLite/PostgreSQL deployments.
+    from sqlalchemy import inspect, text
+    cols={c['name'] for c in inspect(db.engine).get_columns('inquiry')}
+    additions={'case_ref':'VARCHAR(32)','platform':"VARCHAR(40) DEFAULT 'not-specified'",'phone':"VARCHAR(40) DEFAULT ''",'incident_date':"VARCHAR(30) DEFAULT ''",'account_handle':"VARCHAR(120) DEFAULT ''",'evidence_url':"VARCHAR(500) DEFAULT ''",'urgency':"VARCHAR(20) DEFAULT 'normal'",'risk_score':'INTEGER DEFAULT 0','risk_flags':"TEXT DEFAULT ''",'triage_report':"TEXT DEFAULT ''",'contact_method':"VARCHAR(20) DEFAULT 'support'"}
+    for col,definition in additions.items():
+        if col not in cols: db.session.execute(text(f'ALTER TABLE inquiry ADD COLUMN {col} {definition}'))
+    db.session.commit()
     username=os.environ.get('ADMIN_USERNAME'); password=os.environ.get('ADMIN_PASSWORD')
-    if username and password and len(password)>=14 and not AdminUser.query.filter_by(username=username).first():
-        db.session.add(AdminUser(username=username,password_hash=generate_password_hash(password))); db.session.commit()
+    if username and password and len(password)>=14:
+        admin=AdminUser.query.filter_by(username=username).first()
+        if admin is None:
+            db.session.add(AdminUser(username=username,password_hash=generate_password_hash(password))); db.session.commit()
+        elif os.environ.get('RESET_ADMIN_PASSWORD') == '1':
+            admin.password_hash=generate_password_hash(password); db.session.commit()
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.environ.get('PORT',5000)),debug=False)
