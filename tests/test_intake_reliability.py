@@ -95,3 +95,24 @@ def test_csrf_time_limit_uses_integer_seconds_for_itsdangerous():
     source = (ROOT / 'app.py').read_text(encoding='utf-8')
     assert 'WTF_CSRF_TIME_LIMIT=12 * 60 * 60' in source
     assert 'WTF_CSRF_TIME_LIMIT=timedelta' not in source
+
+
+def test_csrf_recovery_refreshes_token_without_losing_submitted_fields():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
+    start = source.index('def handle_csrf_error')
+    end = source.index('def handle_unexpected_error', start)
+    handler = source[start:end]
+    assert 'preserved_form = request.form.copy()' in handler
+    assert "preserved_form.pop('csrf_token', None)" in handler
+    assert 'InquiryForm(formdata=preserved_form)' in handler
+    assert "flash(tr('intake_csrf_error'), 'info')" in handler
+    assert 'Your form session expired' not in source
+
+
+def test_browser_draft_is_tab_scoped_and_never_stores_csrf_or_honeypot():
+    source = (ROOT / 'static/js/app.js').read_text(encoding='utf-8')
+    assert "CASE_DRAFT_KEY = 'yakuza.case-draft.v1'" in source
+    assert "window.sessionStorage.setItem(CASE_DRAFT_KEY" in source
+    assert "window.sessionStorage.getItem(CASE_DRAFT_KEY" in source
+    assert "'csrf_token', 'website', 'submit'" in source
+    assert "window.sessionStorage.removeItem(CASE_DRAFT_KEY)" in source

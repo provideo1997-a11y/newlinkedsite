@@ -155,3 +155,9 @@ body{font-size:var(--body-size);line-height:1.75;letter-spacing:.005em}
 
 /* Safari and low-bandwidth reliability: never let a decorative loader cover usable content. */
 .loader { display: none !important; }
+
+/* Clear WhatsApp hand-off preview; the single primary action stays first. */
+.case-ready-preview{margin-top:22px;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.025);overflow:hidden}
+.case-ready-preview summary{padding:15px 17px;cursor:pointer;color:#dce8e2;font-size:.9rem;font-weight:700}
+.case-ready-preview pre{margin:0;padding:16px;max-height:420px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#080d10;color:#c7d2ce;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace;border-top:1px solid rgba(255,255,255,.1)}
+.case-ready-preview[open] summary{color:#c8ff3d}
