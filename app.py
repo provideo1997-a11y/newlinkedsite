@@ -42,7 +42,8 @@ app.config.update(
     SQLALCHEMY_ENGINE_OPTIONS=sqlalchemy_engine_options(_DATABASE_URI),
     SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','0') == '1',
-    WTF_CSRF_TIME_LIMIT=timedelta(hours=12),
+    # Flask-WTF / itsdangerous expects an integer number of seconds here.
+    WTF_CSRF_TIME_LIMIT=12 * 60 * 60,
     MAX_CONTENT_LENGTH=64 * 1024,
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
     SESSION_REFRESH_EACH_REQUEST=True,
