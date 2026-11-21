@@ -28,7 +28,8 @@ def test_second_page_loads_saved_case_and_contains_server_generated_whatsapp_lin
     assert '_case_handoff_serializer.loads(token, max_age=24 * 60 * 60)' in route
     assert 'Inquiry.query.filter_by(case_ref=case_ref).first_or_404()' in route
     assert "build_case_whatsapp_url(os.environ.get('WHATSAPP_NUMBER', '4917642484892'), item)" in route
-    assert "render_template('case_ready.html', item=item, whatsapp_url=whatsapp_url)" in route
+    assert 'whatsapp_message = build_case_whatsapp_message(item)' in route
+    assert "render_template('case_ready.html', item=item, whatsapp_url=whatsapp_url, whatsapp_message=whatsapp_message)" in route
 
 
 def test_second_page_has_one_whatsapp_link_and_no_extra_actions():
@@ -38,6 +39,9 @@ def test_second_page_has_one_whatsapp_link_and_no_extra_actions():
     assert "t('case_ready_send')" in page
     assert 'target="_blank"' not in page
     assert page.count('<a ') == 1
+    assert '<details class="case-ready-preview">' in page
+    assert '{{ whatsapp_message }}' in page
+    assert "t('case_ready_preview')" in page
 
 
 def test_whatsapp_message_contains_full_saved_case_report():
