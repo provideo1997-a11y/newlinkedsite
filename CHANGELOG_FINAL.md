@@ -39,8 +39,17 @@
 - Fixed the previous reference-only WhatsApp message: the prefilled draft now includes the saved case reference, all submitted requester and incident fields, the full description, advisory risk indicators, and generated triage report.
 - Added a separate explicit consent before sending personal case details to WhatsApp.
 - The case is committed to the database before WhatsApp is opened. Database failures roll back, display an error, and never start the WhatsApp hand-off.
-- Replaced the bare external redirect with a no-store receipt page that confirms persistence, automatically opens `wa.me`, and provides a manual fallback button.
+- Added a no-store receipt page that automatically redirected to `wa.me` after the case was committed, with a manual fallback button. This automatic behavior was subsequently removed in v11 at the owner’s request.
 - Applied `Referrer-Policy: no-referrer` to the case receipt to avoid leaking its page context to WhatsApp; application code does not log the message URL.
 - Added a slow-submission status message so users do not see an unexplained endless submit spinner; the button remains disabled while a pending request could still commit.
 - Added regression tests for the configured international destination, full message payload, URL encoding, explicit consent and commit-before-handoff ordering.
 - Clarified that a normal WhatsApp click-to-chat draft still requires the visitor to press Send; the website cannot observe that final action without an independently configured WhatsApp Business Cloud API/webhook integration.
+
+
+## v11 — explicit WhatsApp click only
+
+- Removed the JavaScript timer and automatic redirect to WhatsApp.
+- The saved-case receipt shows one direct WhatsApp button; the external app/site can open only after the visitor activates it.
+- Updated all 11 UI locales to explain that the visitor must click the button and then press Send themselves.
+- Added `noopener noreferrer` and `no-referrer` protections to the external hand-off link.
+- The case is still committed before the receipt is rendered; no WhatsApp launch is attempted when the number is not configured or valid.

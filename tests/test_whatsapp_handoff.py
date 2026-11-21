@@ -67,3 +67,9 @@ def test_message_is_encoded_as_prefilled_whatsapp_text():
 def test_invalid_destination_does_not_build_external_url():
     assert build_case_whatsapp_url("not a phone number", SampleCase()) is None
     assert build_case_whatsapp_url("0049 0176 42484892", SampleCase()) is None
+
+
+def test_german_international_digits_only_number_is_valid():
+    url = build_case_whatsapp_url("491234567890", SampleCase())
+    assert url is not None
+    assert urlparse(url).path == "/491234567890"

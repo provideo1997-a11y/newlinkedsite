@@ -200,16 +200,3 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
-
-// Open WhatsApp only after the server confirms that the case was committed.
-document.addEventListener('DOMContentLoaded', () => {
-  const handoff = document.getElementById('whatsapp-handoff');
-  if (!handoff) return;
-  const target = handoff.dataset.whatsappUrl;
-  if (!target || !target.startsWith('https://wa.me/')) return;
-  const fallback = document.getElementById('whatsapp-open-link');
-  if (fallback) fallback.addEventListener('click', () => { handoff.dataset.manualOpen = '1'; });
-  window.setTimeout(() => {
-    if (handoff.isConnected && handoff.dataset.manualOpen !== '1') window.location.assign(target);
-  }, 700);
-});

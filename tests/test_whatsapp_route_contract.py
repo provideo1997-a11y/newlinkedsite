@@ -19,12 +19,13 @@ def test_database_commit_precedes_whatsapp_url_generation():
     assert "Case intake could not be committed" in source
 
 
-def test_receipt_has_auto_handoff_and_manual_fallback():
+def test_receipt_has_manual_whatsapp_button_only():
     receipt = (ROOT / "templates" / "submitted.html").read_text(encoding="utf-8")
     script = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
-    assert 'id="whatsapp-handoff" data-whatsapp-url=' in receipt
     assert 'id="whatsapp-open-link"' in receipt
-    assert "window.location.assign(target)" in script
+    assert 'href="{{ whatsapp_url }}"' in receipt
+    assert 'data-whatsapp-url=' not in receipt
+    assert "window.location.assign(target)" not in script
 
 
 def test_whatsapp_data_sharing_consent_is_visible_on_form():

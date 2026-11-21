@@ -140,7 +140,7 @@ Run after each deployment:
 1. `/health` returns 200.
 2. Public intake rejects missing CSRF, invalid arithmetic answer, missing authorization, invalid email, invalid evidence URL, and honeypot completion.
 3. A valid dummy report creates one case with one unique reference.
-4. The database commit succeeds before the receipt page opens WhatsApp. The WhatsApp draft includes all case details and triage report only after separate consent; visitor presses Send manually.
+4. The database commit succeeds before the receipt page is shown. It displays one explicit WhatsApp button; no script or page-load event opens WhatsApp. The draft includes case details and the triage report only after separate consent; the visitor must click the button and press Send manually.
 5. `0049...`, `+49...`, and `49...` produce the same `wa.me` number; malformed numbers do not redirect.
 6. WhatsApp draft is generated only after the database commit, requires explicit sharing consent, and contains the case reference, submitted fields, full description, and triage report. The visitor must press Send manually.
 7. Anonymous requests to every admin route are redirected to login.

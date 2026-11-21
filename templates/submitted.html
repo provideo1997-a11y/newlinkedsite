@@ -8,11 +8,11 @@
   <div class="case-reference" aria-label="Case reference">{{ item.case_ref }}</div>
   <p class="form-note">{{ t('receipt_notice') }}</p>
   {% if whatsapp_url %}
-    <section class="whatsapp-handoff" id="whatsapp-handoff" data-whatsapp-url="{{ whatsapp_url }}" aria-labelledby="whatsapp-handoff-heading">
+    <section class="whatsapp-handoff" aria-labelledby="whatsapp-handoff-heading">
       <h2 id="whatsapp-handoff-heading">{{ t('whatsapp_handoff_title') }}</h2>
       <p>{{ t('whatsapp_handoff_body') }}</p>
-      <p class="submit-footnote" id="whatsapp-handoff-status" role="status" aria-live="polite">{{ t('whatsapp_waiting') }}</p>
-      <a class="button button-primary" id="whatsapp-open-link" href="{{ whatsapp_url }}" rel="noreferrer">{{ t('whatsapp_open_button') }} ↗</a>
+      <p class="submit-footnote" id="whatsapp-click-instructions">{{ t('whatsapp_waiting') }}</p>
+      <a class="button button-primary" id="whatsapp-open-link" href="{{ whatsapp_url }}" rel="noopener noreferrer" referrerpolicy="no-referrer" aria-describedby="whatsapp-click-instructions">{{ t('whatsapp_open_button') }} ↗</a>
     </section>
   {% elif whatsapp_unavailable %}
     <p class="form-note" role="alert">{{ t('whatsapp_unavailable') }}</p>

@@ -1,33 +1,38 @@
-# YAKUZA v10 build verification
+# YAKUZA v11 build verification
 
 Validation performed against the exact source tree included in this archive:
 
-- `pytest -q`: **27 tests passed**, including WhatsApp number normalization, complete draft payload, URL encoding, invalid-number rejection, required data-sharing consent, database-commit-before-handoff ordering, receipt fallback and privacy-header preservation.
+- `pytest -q`: **32 tests passed**, including WhatsApp destination normalization, full draft payload, URL encoding, invalid-number rejection, required sharing consent, database-commit-before-draft ordering, explicit-button-only hand-off, translation catalogs, and receipt security attributes.
 - `python -m compileall -q .`: passed.
+- Python AST parsing for project Python files: passed.
 - `node --check static/js/app.js`: passed.
 - Jinja syntax parsing: all 10 HTML templates parsed successfully.
-- Render YAML syntax and required service settings parsed successfully.
-- Source-level checks confirm the receipt uses a no-store response and `Referrer-Policy: no-referrer`.
+- Render YAML syntax and health-check configuration parsed successfully.
 - Shell commit helper syntax: `bash -n COMMIT_UPDATE.sh` passed.
-- No new runtime Python dependency was introduced; `whatsapp_utils.py` uses Python standard-library URL encoding.
-- Release hygiene: `.env`, instance databases, backups, Python caches, and local previews are excluded from the archive.
+- No new runtime dependency was introduced. The WhatsApp message and URL helper use the Python standard library.
+- Release hygiene: `.env`, instance databases, backups, Python caches, pytest caches, and temporary previews are excluded from the archive.
 - ZIP integrity and SHA-256 checksum were verified after packaging.
 
-## WhatsApp behavior now implemented
+## WhatsApp behavior in v11
 
-1. The user selects WhatsApp and separately consents to share the submitted case information.
-2. The server validates the configured international destination number.
-3. The Flask application generates the case reference, saves the complete user-entered narrative and incident fields, builds advisory triage text, and commits the record.
-4. If the database commit fails, the transaction is rolled back, an error is shown, and no WhatsApp URL is generated.
-5. After a successful commit, the receipt confirms the saved case and automatically navigates to a `wa.me` URL containing the full case summary and triage report. A visible manual link is available if auto-navigation is blocked.
-6. The visitor still has to review and press Send in WhatsApp. A click-to-chat URL does not send a message and the website cannot observe that final action without a separate WhatsApp Business Platform/API webhook integration.
+1. The visitor selects WhatsApp as the preferred contact method and separately consents to share the case details.
+2. The server validates the input, builds the case reference and advisory triage report, and commits the case to the configured database.
+3. If the database commit fails, the transaction is rolled back, an error is shown, and the visitor is not offered a WhatsApp hand-off.
+4. After a successful commit, the receipt displays exactly one WhatsApp button with a direct `https://wa.me/<number>?text=...` link.
+5. No script, timer, load handler, form submission handler, or page redirect opens WhatsApp automatically. WhatsApp opens only after the visitor clicks the button.
+6. The message draft includes the case reference, requester details, incident fields, full description, advisory risk indicators, and generated triage report.
+7. The visitor must inspect the draft and press Send in WhatsApp. A standard click-to-chat link cannot send automatically or tell the website whether the visitor completed the send.
+
+## Environment requirement
+
+Set `WHATSAPP_NUMBER` in Render → Web Service → Environment to the business destination in international digits-only format. For a German number, begin with `49` and omit `+`, `00`, spaces, and Germany's domestic trunk zero. Keep the production number in Render rather than committing it into public source. Redeploy after changing the value.
 
 ## Not performed in this environment
 
-- Full Flask startup or live request/route integration test: Flask dependencies were not installed in the build environment, and the package index was unreachable.
-- Live PostgreSQL test, migration, or validation against the production database.
-- Real device/browser launch into WhatsApp, WhatsApp account registration check, or delivery test. The user-provided number is format-valid but account ownership/registration cannot be confirmed from the number alone.
+- Full Flask startup or live route test: Flask dependencies were not installed in this build environment.
+- Live PostgreSQL transaction, migration, or production-database validation.
+- Real mobile/desktop WhatsApp launch, account registration check, or actual message delivery. The number was validated for format only.
 - Live Render deployment or GitHub commit/push.
-- Independent penetration test, accessibility certification, performance/load test, or production monitoring validation.
+- Independent penetration test, accessibility certification, or load test.
 
-This archive is source-validated with focused regression tests. It is not a claim that the live service or real WhatsApp delivery has been tested.
+This archive is source-validated and unit-tested. It is not a claim that the live Render site or end-to-end WhatsApp delivery has been tested.
