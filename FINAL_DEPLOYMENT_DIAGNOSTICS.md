@@ -1,26 +1,33 @@
-# Final deployment diagnostics
+# Final deployment diagnostics — secure case submission
 
-## Why a submission could reload the contact page
-The previous client explicitly called `window.location.reload()` when Flask-WTF rejected a CSRF token. This hid the actual CSRF problem behind a page refresh. A stale browser-cached JavaScript file could keep doing the same after a code deployment.
+## Expected one-button path
+1. Visitor completes the form and arithmetic check.
+2. Visitor clicks **Send to WhatsApp** once.
+3. The browser posts JSON to the same-origin `/contact` endpoint.
+4. Flask validates the form, commits the case, then returns a WhatsApp destination.
+5. The browser navigates to `https://wa.me/<number>?text=...`; the visitor presses Send inside WhatsApp.
 
-## What this repair changes
-1. The AJAX CSRF handler generates a fresh CSRF token and returns it as JSON.
-2. When the signed per-form case token is still valid, the browser updates its hidden CSRF field and retries the same submission exactly once.
-3. If the per-form token expired too, the server supplies a new case token and arithmetic challenge; the user solves the challenge and uses the same sole button again.
-4. The intake JavaScript no longer reloads the current page automatically.
-5. The asset URL has a new version query key, forcing browsers to fetch the repaired JavaScript.
-6. The form targets the canonical contact endpoint; language query cleanup only redirects GET requests.
+## What the token-renewal defect was
+There were two different token error paths. Flask-WTF CSRF failures used `CSRF_TOKEN_REFRESHED`, which the client knew how to process. But an expired/invalid YAKUZA case token was handled inside `/contact` and returned only a message + token fields without a recovery code or refreshed CSRF token. The JavaScript did not apply those fields. That meant the next click reused stale hidden data and could show the same message again.
 
-## After deployment
-1. Open the public contact form in a private/incognito window.
-2. Confirm browser DevTools → Network loads `static/js/app.js?v=csrf-refresh-20261121` with HTTP 200.
-3. Submit a dummy case once.
-4. The POST `/contact` should respond with JSON `ok: true`; the browser should then navigate to `https://wa.me/<digits>?text=...`.
-5. If a CSRF response occurs, it should be JSON `code: CSRF_TOKEN_REFRESHED`, followed by one automatic retry; it must not reload the page.
-6. In Render Logs, search for `intake_failure` and inspect only the `stage`, `error_type`, and support reference. Do not publish the full WhatsApp URL or case details.
+This repair unifies the two paths. It returns `CASE_TOKEN_REFRESHED`, refreshes the CSRF token, updates the case token and question in the DOM, and focuses the answer field when a genuinely new calculation is required. For a still-authentic token between one and 24 hours old, it re-signs the original challenge and retries the same request automatically.
+
+## Test after deployment
+- Use a fresh private/incognito browser tab.
+- Open the contact page and complete all required fields, consents and arithmetic check.
+- Click **Send to WhatsApp** once.
+- Expected: the case is saved, then WhatsApp opens with the full message.
+- If a new security check appears, verify the displayed arithmetic question changes and the answer field is focused; solve it and click the same button again.
+- Check Render Logs for `intake_committed`, `intake_reused`, or `intake_failure`. These events do not log submitted names, email addresses or incident descriptions.
 
 ## Environment invariants
-- `SECRET_KEY` must be a stable, long random value and must be identical across all running workers/instances. Do not rotate it during a visitor's active form session.
-- Keep `WHATSAPP_NUMBER` as an international digits-only or normalizable number (for example `4917642484892`).
-- Keep HTTPS and `COOKIE_SECURE=1` on Render.
-- The configured database must pass `/health/db` before accepting real cases.
+- `SECRET_KEY` must remain stable across deployments and be identical across all running instances. Do not regenerate it during deploys.
+- `WHATSAPP_NUMBER` must be digits-only international format (for the configured German number, begin with `49`, not `0049` or `+`).
+- `DATABASE_URL` must point to the intended persistent database.
+- `/health/db` only confirms database reachability; it does not validate CSRF/session signing.
+
+## If the fresh check keeps reappearing
+A repeated new challenge after deployment strongly suggests inconsistent `SECRET_KEY` values between app instances, a secret being changed between GET and POST, or an old deployment/static asset still being served. Confirm all instances use the same exact Render `SECRET_KEY`, check the deployed commit SHA, and hard-refresh/clear the site's cached files once. Do not paste the secret into logs or chat.
+
+## Limits of local verification
+Automated tests, helper logic, Python compilation, JavaScript syntax, and template parsing passed here. The real Render browser POST, PostgreSQL commit and WhatsApp launch must still be tested after deployment; this environment cannot access your live Render runtime.

@@ -1,15 +1,23 @@
-# Build verification — CSRF / reload repair
+# Build verification — case-token recovery repair
 
-## Verified in this build environment
-- `pytest -q`: **46 passed**.
-- Python bytecode compilation and AST parsing: passed.
-- JavaScript syntax (`node --check static/js/app.js`): passed.
-- All 9 Jinja templates parsed: passed.
-- Contact form has exactly one submit button and an explicit canonical `/contact` action.
-- CSRF error response returns fresh CSRF/case tokens and no reload directive.
-- Client retries one recoverable CSRF failure in-place and contains no `window.location.reload()` call.
-- Existing WhatsApp link/message generation, case idempotency, migration, database timeout, translation, and security tests passed.
-- Release ZIP integrity and SHA-256 verified.
+## Root cause confirmed in the previous build
+The `/contact` route had its own JSON error helper for an expired/invalid signed case token. It returned a replacement `case_token` and `human_question`, but did not return a machine-readable recovery code or a fresh Flask-WTF `csrf_token`. The browser only applied refreshed values when it saw `CSRF_TOKEN_REFRESHED`, so it kept posting the stale hidden case token and did not update the arithmetic prompt. The user repeatedly saw the token-renewal message without a working next step.
+
+## Corrected behavior
+- Route-level recovery now returns `CASE_TOKEN_REFRESHED`, a fresh CSRF token, a new/current case token, the visible arithmetic question, and an explicit retryability flag.
+- Client code recognizes both CSRF and case-token recovery responses, updates the hidden fields and visible question, clears the old answer when a new challenge is required, and focuses the new answer field.
+- Authentic case tokens older than one hour but younger than 24 hours are re-signed while preserving the case reference and arithmetic challenge, allowing the original submission to continue or be retried without creating a duplicate.
+- Tokens with an invalid signature, a different signing secret, or an age beyond the grace window receive a genuinely new reference/challenge. The new challenge is rendered in place; no page reload is requested.
+- The JavaScript cache key is bumped so the browser loads the corrected handler.
+
+## Verification completed in this environment
+- `pytest -q`: **51 passed**.
+- `python -m py_compile app.py security_utils.py whatsapp_utils.py`: passed.
+- Python AST parse: 12 project/test Python files passed.
+- `node --check static/js/app.js`: passed.
+- Jinja parse: all 9 templates passed.
+- Regression tests exercise actual extracted ItsDangerous helper functions for (a) a valid but expired token preserving its reference and challenge, and (b) a token signed by an old secret producing a fresh challenge.
+- ZIP contents and SHA-256 checksum verified after packaging.
 
 ## Not verified here
-The environment has no Flask / Flask-SQLAlchemy / Flask-WTF / Flask-Limiter packages and cannot resolve the package index or your Render host. Therefore, this environment could not run the full Flask HTTP test client against PostgreSQL or perform a live WhatsApp hand-off. Do a dummy-case staging submission after deployment and check `FINAL_DEPLOYMENT_DIAGNOSTICS.md` before accepting real requests.
+Flask, Flask-SQLAlchemy, Flask-WTF and Flask-Limiter are not installed in this build runtime, and package-index access is unavailable. Therefore a full Flask test-client submission against PostgreSQL, a live Render request, and WhatsApp launch/send could not be run here. The application must be deployed to staging and tested with a dummy case before receiving real customer records.

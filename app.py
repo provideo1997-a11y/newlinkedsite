@@ -14,7 +14,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from time import perf_counter
-from itsdangerous import URLSafeTimedSerializer, BadSignature
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from security_utils import normalize_database_url, merge_locale_translations, csv_safe, sqlalchemy_engine_options, normalize_whatsapp_number, ensure_unique_case_reference_index
 from whatsapp_utils import build_case_whatsapp_url
 
@@ -530,7 +530,7 @@ for _locale, _copy in UI_COPY.items():
 # Intake submission progress/errors. These are used by the AJAX path while
 # the same endpoint retains a normal HTML form fallback when JavaScript is off.
 INTAKE_STATUS_COPY = {
-'en': {'saving':'Saving your case securely…','waiting':'The server is still processing your request. Keep this page open.','timeout':'No response was received in time. Your case may already have been saved. Press the same Send to WhatsApp button again; the case reference prevents duplicates.','network_error':'The connection was interrupted. Check your connection and press the same Send to WhatsApp button again.','saved':'Case saved. Opening WhatsApp…','invalid_response':'The server returned an unexpected response. Please retry using the same button.','form_error':'Please check the highlighted fields and try again.','csrf_error':'Your form session expired. Reload this page and submit again.'},
+'en': {'saving':'Saving your case securely…','waiting':'The server is still processing your request. Keep this page open.','timeout':'No response was received in time. Your case may already have been saved. Press the same Send to WhatsApp button again; the case reference prevents duplicates.','network_error':'The connection was interrupted. Check your connection and press the same Send to WhatsApp button again.','saved':'Case saved. Opening WhatsApp…','invalid_response':'The server returned an unexpected response. Please retry using the same button.','form_error':'Please check the highlighted fields and try again.','csrf_error':'A fresh security check is shown above. Solve it, then press Send to WhatsApp.'},
 'fr': {'saving':'Enregistrement sécurisé de votre dossier…','waiting':'Le serveur traite toujours votre demande. Gardez cette page ouverte.','timeout':'Aucune réponse dans le délai prévu. Votre dossier a peut-être déjà été enregistré. Cliquez à nouveau sur le même bouton ; la référence évite les doublons.','network_error':'La connexion a été interrompue. Vérifiez votre connexion puis cliquez à nouveau sur le même bouton.','saved':'Dossier enregistré. Ouverture de WhatsApp…','invalid_response':'Réponse inattendue du serveur. Réessayez avec le même bouton.','form_error':'Vérifiez les champs signalés puis réessayez.','csrf_error':'Votre jeton de formulaire a été renouvelé. Résolvez le nouveau calcul puis cliquez de nouveau sur Envoyer vers WhatsApp.'},
 'ar': {'saving':'جارٍ حفظ ملفك بأمان…','waiting':'ما زال الخادم يعالج طلبك. اترك الصفحة مفتوحة.','timeout':'لم يصل رد في الوقت المحدد. ربما تم حفظ ملفك بالفعل. اضغط زر الإرسال نفسه مجدداً؛ رقم الملف يمنع التكرار.','network_error':'انقطع الاتصال. تحقق من الشبكة واضغط زر الإرسال نفسه مجدداً.','saved':'تم حفظ الملف. جارٍ فتح واتساب…','invalid_response':'وصل رد غير متوقع من الخادم. أعد المحاولة بالزر نفسه.','form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.','csrf_error':'تم تجديد رمز النموذج. أجب عن عملية الجمع الجديدة ثم اضغط إرسال إلى واتساب مرة أخرى.'},
 'ar-tn': {'saving':'قاعدين نحفظو الملف متاعك بأمان…','waiting':'السيرفر مازال يعالج في الطلب. خلّي الصفحة محلولة.','timeout':'ما وصلناش رد في الوقت المحدد. ينجم الملف يكون تسجّل. اضغط نفس زر الإرسال مرة أخرى؛ رقم الملف يمنع التكرار.','network_error':'الاتصال تقصّ. تثبّت من الإنترنت واضغط نفس زر الإرسال مرة أخرى.','saved':'الملف تسجّل. قاعدين نحلّو واتساب…','invalid_response':'السيرفر رجّع إجابة غير متوقعة. عاود بنفس الزر.','form_error':'راجع الخانات المعلّمة وعاود المحاولة.','csrf_error':'جدّدنا رمز الفورم. جاوب على العملية الحسابية الجديدة واضغط ابعث لواتساب من جديد.'},
@@ -545,7 +545,7 @@ INTAKE_STATUS_COPY = {
 for _locale, _copy in INTAKE_STATUS_COPY.items():
     LANGS[_locale].update({f'intake_{key}': value for key, value in _copy.items()})
 
-INTAKE_ERROR_COPY = {'en': {'intake_form_error': 'Please check the form fields and try again.', 'intake_csrf_error': 'Your secure form token was renewed. Please solve the updated check and press Send to WhatsApp again.'}, 'fr': {'intake_form_error': 'Vérifiez les champs du formulaire puis réessayez.', 'intake_csrf_error': 'Votre jeton de formulaire a été renouvelé. Résolvez le nouveau calcul puis cliquez de nouveau sur Envoyer vers WhatsApp.'}, 'ar': {'intake_form_error': 'يرجى مراجعة حقول النموذج ثم المحاولة مجدداً.', 'intake_csrf_error': 'تم تجديد رمز النموذج. أجب عن عملية الجمع الجديدة ثم اضغط إرسال إلى واتساب مرة أخرى.'}, 'ar-tn': {'intake_form_error': 'راجع معلومات الفورم وعاود المحاولة.', 'intake_csrf_error': 'جدّدنا رمز الفورم. جاوب على العملية الحسابية الجديدة واضغط ابعث لواتساب من جديد.'}, 'es': {'intake_form_error': 'Comprueba los campos del formulario y vuelve a intentarlo.', 'intake_csrf_error': 'Se renovó el token del formulario. Resuelve la nueva operación y pulsa Enviar a WhatsApp otra vez.'}, 'de': {'intake_form_error': 'Bitte prüfe die Formularfelder und versuche es erneut.', 'intake_csrf_error': 'Dein Formular-Token wurde erneuert. Löse die neue Rechenaufgabe und klicke erneut auf An WhatsApp senden.'}, 'it': {'intake_form_error': 'Controlla i campi del modulo e riprova.', 'intake_csrf_error': 'Il token del modulo è stato rinnovato. Risolvi il nuovo calcolo e premi di nuovo Invia a WhatsApp.'}, 'pt': {'intake_form_error': 'Verifique os campos do formulário e tente novamente.', 'intake_csrf_error': 'O token do formulário foi renovado. Resolva a nova conta e clique novamente em Enviar para o WhatsApp.'}, 'tr': {'intake_form_error': 'Lütfen form alanlarını kontrol edip yeniden deneyin.', 'intake_csrf_error': 'Form güvenlik belirteciniz yenilendi. Yeni işlemi çözün ve WhatsApp’a Gönder düğmesine tekrar basın.'}, 'zh': {'intake_form_error': '请检查表单字段后重试。', 'intake_csrf_error': '表单安全令牌已更新。请完成新的计算题，然后再次点击发送到 WhatsApp。'}, 'ja': {'intake_form_error': 'フォームの項目を確認して再試行してください。', 'intake_csrf_error': 'フォームのセキュリティトークンを更新しました。新しい計算問題に答えて、WhatsAppに送信をもう一度押してください。'}}
+INTAKE_ERROR_COPY = {'en': {'intake_form_error': 'Please check the form fields and try again.', 'intake_csrf_error': 'A fresh security check is shown above. Solve it, then press Send to WhatsApp.'}, 'fr': {'intake_form_error': 'Vérifiez les champs du formulaire puis réessayez.', 'intake_csrf_error': 'Votre jeton de formulaire a été renouvelé. Résolvez le nouveau calcul puis cliquez de nouveau sur Envoyer vers WhatsApp.'}, 'ar': {'intake_form_error': 'يرجى مراجعة حقول النموذج ثم المحاولة مجدداً.', 'intake_csrf_error': 'تم تجديد رمز النموذج. أجب عن عملية الجمع الجديدة ثم اضغط إرسال إلى واتساب مرة أخرى.'}, 'ar-tn': {'intake_form_error': 'راجع معلومات الفورم وعاود المحاولة.', 'intake_csrf_error': 'جدّدنا رمز الفورم. جاوب على العملية الحسابية الجديدة واضغط ابعث لواتساب من جديد.'}, 'es': {'intake_form_error': 'Comprueba los campos del formulario y vuelve a intentarlo.', 'intake_csrf_error': 'Se renovó el token del formulario. Resuelve la nueva operación y pulsa Enviar a WhatsApp otra vez.'}, 'de': {'intake_form_error': 'Bitte prüfe die Formularfelder und versuche es erneut.', 'intake_csrf_error': 'Dein Formular-Token wurde erneuert. Löse die neue Rechenaufgabe und klicke erneut auf An WhatsApp senden.'}, 'it': {'intake_form_error': 'Controlla i campi del modulo e riprova.', 'intake_csrf_error': 'Il token del modulo è stato rinnovato. Risolvi il nuovo calcolo e premi di nuovo Invia a WhatsApp.'}, 'pt': {'intake_form_error': 'Verifique os campos do formulário e tente novamente.', 'intake_csrf_error': 'O token do formulário foi renovado. Resolva a nova conta e clique novamente em Enviar para o WhatsApp.'}, 'tr': {'intake_form_error': 'Lütfen form alanlarını kontrol edip yeniden deneyin.', 'intake_csrf_error': 'Form güvenlik belirteciniz yenilendi. Yeni işlemi çözün ve WhatsApp’a Gönder düğmesine tekrar basın.'}, 'zh': {'intake_form_error': '请检查表单字段后重试。', 'intake_csrf_error': '表单安全令牌已更新。请完成新的计算题，然后再次点击发送到 WhatsApp。'}, 'ja': {'intake_form_error': 'フォームの項目を確認して再試行してください。', 'intake_csrf_error': 'フォームのセキュリティトークンを更新しました。新しい計算問題に答えて、WhatsAppに送信をもう一度押してください。'}}
 for _locale, _copy in INTAKE_ERROR_COPY.items():
     LANGS[_locale].update(_copy)
 
@@ -583,8 +583,7 @@ def issue_case_token():
     token = _case_token_serializer.dumps({'ref': case_ref, 'a': a, 'b': b})
     return token, f'{a} + {b}'
 
-def read_case_token(token):
-    payload = _case_token_serializer.loads(token or '', max_age=3600)
+def _validate_case_token_payload(payload):
     if (not isinstance(payload, dict)
             or not re.fullmatch(r'YKZ-[0-9]{6}-[A-F0-9]{12}', str(payload.get('ref', '')))
             or not isinstance(payload.get('a'), int)
@@ -592,6 +591,33 @@ def read_case_token(token):
             or not (2 <= payload['a'] <= 9 and 1 <= payload['b'] <= 9)):
         raise BadSignature('Invalid intake token payload')
     return payload
+
+
+def read_case_token(token):
+    """Read a case token while it is within its normal one-hour lifetime."""
+    payload = _case_token_serializer.loads(token or '', max_age=3600)
+    return _validate_case_token_payload(payload)
+
+
+def refresh_case_token(token):
+    """Renew an expired-but-authentic form token without changing its challenge.
+
+    A grace window prevents a form left open through a Render cold start or a
+    long review from losing its reference and arithmetic answer. Tokens older
+    than 24 hours, malformed tokens, or tokens signed by a different SECRET_KEY
+    receive a new reference/challenge and must be solved again.
+    Returns (token, human_question, retryable).
+    """
+    try:
+        payload = _case_token_serializer.loads(token or '', max_age=24 * 60 * 60)
+        payload = _validate_case_token_payload(payload)
+        renewed = _case_token_serializer.dumps({
+            'ref': payload['ref'], 'a': payload['a'], 'b': payload['b']
+        })
+        return renewed, f"{payload['a']} + {payload['b']}", True
+    except BadSignature:
+        renewed, question = issue_case_token()
+        return renewed, question, False
 
 class Inquiry(db.Model):
     id=db.Column(db.Integer,primary_key=True)
@@ -674,14 +700,29 @@ def contact():
                 question = f"{payload['a']} + {payload['b']}"
             except BadSignature:
                 form.case_token.data, question = issue_case_token()
+                form.human_answer.data = ''
                 token_refreshed = True
         if wants_json:
             response_payload = {'ok': False, 'error': message, 'support_reference': support_reference}
             if code:
                 response_payload['code'] = code
             if token_refreshed:
-                response_payload.update({'case_token': form.case_token.data, 'human_question': question})
-            return jsonify(response_payload), status
+                # Keep the client and server in sync. Previously this branch
+                # returned only a new case token/question, without a machine-
+                # readable code or refreshed Flask-WTF token. The JavaScript
+                # therefore kept posting the stale values forever.
+                response_payload.update({
+                    'code': 'CASE_TOKEN_REFRESHED',
+                    'csrf_token': generate_csrf(),
+                    'case_token': form.case_token.data,
+                    'human_question': question,
+                    'retryable': False,
+                })
+            response = jsonify(response_payload)
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Referrer-Policy'] = 'no-referrer'
+            return response, status
         flash(message if not code else f'{message} (Reference: {support_reference})', 'error')
         return render_template('contact.html', form=form, human_question=question), status
 
@@ -694,6 +735,18 @@ def contact():
 
     try:
         token_data = read_case_token(form.case_token.data)
+    except SignatureExpired:
+        # A form can outlive its one-hour operational token. If its signature
+        # is still authentic (within the 24-hour grace window), renew it while
+        # retaining the same case reference and arithmetic answer. This lets
+        # the original single click continue instead of asking for a new form.
+        renewed_token, _question, retryable = refresh_case_token(form.case_token.data)
+        if retryable:
+            form.case_token.data = renewed_token
+            token_data = read_case_token(renewed_token)
+        else:
+            form.case_token.data = renewed_token
+            return error(tr('intake_csrf_error'), 400, renew_token=True)
     except BadSignature:
         return error(tr('intake_csrf_error'), 400, renew_token=True)
 
@@ -865,6 +918,8 @@ def handle_csrf_error(error):
             case_token = submitted_case_token
             human_question = f"{token_data['a']} + {token_data['b']}"
             retryable = True
+        except SignatureExpired:
+            case_token, human_question, retryable = refresh_case_token(submitted_case_token)
         except BadSignature:
             case_token, human_question = issue_case_token()
             retryable = False

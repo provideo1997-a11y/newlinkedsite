@@ -186,17 +186,30 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Recover an expired/mismatched CSRF token without reloading the page.
       // Only retry once, and only while the same signed case token is valid.
-      if (payload && payload.code === 'CSRF_TOKEN_REFRESHED') {
+      const tokenWasRefreshed = payload && (
+        payload.code === 'CSRF_TOKEN_REFRESHED' ||
+        payload.code === 'CASE_TOKEN_REFRESHED'
+      );
+      if (tokenWasRefreshed) {
         applyRefreshedTokens(payload);
         if (!payload.retryable) {
-          reset(payload.error || form.dataset.timeoutMessage || 'Your form session expired. Please solve the refreshed check and send again.');
+          reset(payload.error || form.dataset.timeoutMessage || 'A fresh security check is shown above. Solve it and send again.');
+          const answer = document.getElementById('human_answer');
+          if (answer) {
+            answer.focus({ preventScroll: true });
+            answer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
           return;
         }
+        // A still-authentic token is renewed with its original answer and
+        // reference, then the same single click is retried automatically.
         setStatus(form.dataset.savingMessage || 'Refreshing the secure session…');
         response = await sendRequest();
         parsed = await readPayload(response);
         payload = parsed.payload;
-        if (payload && payload.code === 'CSRF_TOKEN_REFRESHED') applyRefreshedTokens(payload);
+        if (payload && (payload.code === 'CSRF_TOKEN_REFRESHED' || payload.code === 'CASE_TOKEN_REFRESHED')) {
+          applyRefreshedTokens(payload);
+        }
       }
 
       if (!response.ok || !payload || payload.ok !== true || typeof payload.redirect_url !== 'string') {
