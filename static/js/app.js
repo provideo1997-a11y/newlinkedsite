@@ -81,3 +81,23 @@
     }, { passive: true });
   }
 })();
+// Live character counter for the case description.
+document.addEventListener('DOMContentLoaded',()=>{const field=document.getElementById('case-story');const count=document.getElementById('story-count');if(field&&count){const update=()=>{count.textContent=String(field.value.length);count.style.color=field.value.length>=25?'#c8ff3d':'#96a3a4'};field.addEventListener('input',update);update();}});
+
+
+// Prevent accidental duplicate case submissions and provide a visible submit state.
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('case-intake-form');
+  if (!form) return;
+  form.addEventListener('submit', () => {
+    if (form.dataset.submitting === '1') return;
+    form.dataset.submitting = '1';
+    form.setAttribute('aria-busy', 'true');
+    const submit = form.querySelector('button[type="submit"], input[type="submit"]');
+    if (submit) {
+      submit.disabled = true;
+      submit.classList.add('is-submitting');
+      submit.setAttribute('aria-label', 'Submitting request');
+    }
+  });
+});

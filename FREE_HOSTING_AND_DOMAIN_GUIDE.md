@@ -1,40 +1,51 @@
-# Free hosting and domain proposal for YAKUZA
+# Render setup guide
 
-## Short answer
+The app can be tested on Render Free, but Render Free is not permanent production hosting for private case data. Read `RENDER_FREE_LIMITS.md` before launch.
 
-There is no responsible way to promise **free lifetime hosting or a free lifetime domain**. Providers can change free plans, suspend inactive or over-quota services, or discontinue a subdomain. A free provider subdomain is the realistic no-cost option; a custom `.com`/`.net` domain normally has a registration and renewal fee.
+## Create/update the Web Service
+1. Push the contents of `yakuza_enterprise/` to the root of your GitHub repository (so `app.py`, `requirements.txt`, and `render.yaml` are at repository root).
+2. Render Dashboard → New → Blueprint if you want to use `render.yaml`, or open the existing Web Service and configure it manually.
+3. Select the GitHub repository and production branch.
+4. Root Directory: blank.
+5. Build: `pip install -r requirements.txt`
+6. Start: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
+7. Health check: `/health`
+8. Plan: Free for a demo only.
+9. Add the environment variables below and deploy.
 
-## Recommended no-cost launch: Render + its free subdomain
+## Environment variables
+| Key | Value |
+|---|---|
+| `SECRET_KEY` | Generate a strong random value; never reuse a leaked key |
+| `ADMIN_USERNAME` | Your chosen admin login |
+| `ADMIN_PASSWORD` | Unique password, 16+ characters |
+| `COOKIE_SECURE` | `1` |
+| `ADMIN_URL_PREFIX` | `/private-inbox` |
+| `WHATSAPP_NUMBER` | `0049...` or `+49...`, international format; omit the national leading zero after country code |
+| `INTAKE_RATE_LIMIT` | `30 per hour` |
+| `RATELIMIT_STORAGE_URI` | `memory://` for single-instance demo only |
+| `DATABASE_URL` | PostgreSQL Internal Database URL; required before real case data |
 
-This project is a Flask application with server-side forms and a private administrator inbox, so it needs a Python web-service host. Render supports Python web services and assigns an `onrender.com` address. The included `render.yaml` is configured for this deployment.
+Never paste secrets into GitHub, chat, screenshots, source files, or README.
 
-1. Create a GitHub account and a **private** repository.
-2. Extract the ZIP and upload the contents of the `yakuza_enterprise` folder to the repository root.
-3. Create a free account at https://render.com/ and choose **New → Blueprint** (or **New → Web Service**).
-4. Connect the repository containing `render.yaml`.
-5. Supply `ADMIN_USERNAME` and `ADMIN_PASSWORD` when prompted. Use a unique password of at least 14 characters.
-6. Confirm the service uses the Free plan and deploy.
-7. Render will assign an address similar to `https://yakuza-digital-agency.onrender.com`. The exact name depends on availability and may need to be adjusted in the dashboard.
-8. Test `/`, `/contact`, `/health`, and `/private-inbox/login`. Submit a dummy inquiry and confirm it appears only after admin login.
+## Fixing the WhatsApp number
+For a German number:
+- If the number is written as `0049 17...`, the app removes `00` and separators.
+- If written as `+49 17...`, the app removes `+` and separators.
+- The final `wa.me` URL uses digits only, e.g. `4917...`.
+- Do not include Germany's domestic trunk `0` after `49`.
+- Confirm the WhatsApp account is registered and can receive messages.
 
-The Blueprint configures the WhatsApp destination as `4917642484892` (+49 176 42484892). If the number changes, update `WHATSAPP_NUMBER` in Render's Environment settings and redeploy.
+## Verify after deployment
+1. Open `/health` and confirm JSON status `ok`.
+2. Open the homepage and switch every language.
+3. Submit a clearly fake test case, then confirm the generated reference.
+4. Log in at `/private-inbox/login`.
+5. Confirm the record appears in the dashboard and the detail page.
+6. Change status and confirm it persists after refresh.
+7. Export CSV and inspect values.
+8. Test WhatsApp hand-off with a test number. Confirm the case is already present in the dashboard before the redirect.
+9. Delete the dummy case manually only after testing (the current UI has no delete action; use the database admin/SQL workflow carefully).
 
-## Free-tier limitations you must understand
-
-- Render Free web services spin down after 15 minutes without inbound traffic and can take around a minute to wake up.
-- Free web services have an ephemeral filesystem. Local SQLite records can be lost on spin-down, restart, or redeploy.
-- Render's Free Postgres currently expires after 30 days and has no backups. Do not use it as permanent client-message storage.
-- Free plan limits, quotas, and availability can change. This is a free launch option, **not a lifetime service-level guarantee**.
-- Use a durable database with backups and suitable paid hosting before handling real customer cases.
-
-## Why not GitHub Pages?
-
-GitHub Pages is excellent for static HTML/CSS/JavaScript websites, but it does not run this project's Flask/Python backend, private inbox, authentication, or database. Moving to GitHub Pages would require rebuilding the app as a static frontend and moving its backend elsewhere.
-
-## Other option: PythonAnywhere
-
-PythonAnywhere has a limited free Beginner account, but its current published limits include a single web app with a one-month expiry, 100 CPU seconds, and 512 MiB storage. It is not a stronger lifetime guarantee. Check the provider's current terms before choosing it.
-
-## Practical proposal
-
-Start with Render's free `onrender.com` subdomain to publish a preview without buying a domain. Keep the GitHub repository private, use strong admin credentials, and do not store real client records until persistent database storage, backups, and retention rules are configured. When the agency is ready for dependable business use, budget for a registered domain and reliable hosting rather than relying on a free tier indefinitely.
+## Existing service update
+Do not create a second service if you want to keep `newlinkedsite.onrender.com`. Update the existing GitHub repository files, commit, then let the linked Render service deploy. Confirm the service is linked to the intended repository and branch first.

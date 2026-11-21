@@ -1,28 +1,26 @@
-# Internal technical review — YAKUZA case platform
+# Technical review — YAKUZA Private Case Desk
 
-**Build scope:** public marketing site, structured complaint intake, protected case operations, multilingual UI and WhatsApp hand-off.
+## Delivered in this build
+- Flask public website and structured case intake.
+- Multilingual public site and intake, including Arabic RTL and Tunisian Arabic.
+- Admin dashboard, individual case report, status updates, and protected CSV export.
+- Dashboard, case detail, receipt, and risk-triage interface translations for all bundled locales.
+- Admin language choice is retained across successful login. Eleven admin locales are initialized safely; four additional admin locales use English fallback on untranslated public-site pages.
+- Configurable intake rate limit; default raised from 5/hour to 30/hour.
+- CSRF, server-side validation, honeypot, arithmetic challenge, request-size limit, secure cookie options, security headers, and admin session checks.
+- WhatsApp number normalization for `0049...`, `+49...`, and digits-only international formats.
+- WhatsApp prefilled message minimizes personal data and includes only the case reference.
+- CSV formula-injection neutralization.
+- Accurate dashboard totals beyond the latest 250 displayed records.
+- PostgreSQL URL normalization to the installed psycopg 3 driver, and Render deployment configuration.
 
-## Delivered
-- Unique human-readable case reference for each accepted submission.
-- Structured intake: contact, platform, account handle, incident date, category, urgency, narrative and optional HTTPS evidence link.
-- Server-side validation, CSRF, per-IP rate limits, honeypot and session-bound arithmetic human check.
-- Submission persisted before WhatsApp hand-off; prefilled WhatsApp message includes case reference and a short summary for the visitor to review/send.
-- Private dashboard metrics, individual case report, status workflow and authenticated CSV export.
-- Advisory triage report with transparent matched indicators and safe next-step guidance.
-- Arabic RTL plus Arabic/Tunisian locale selector; existing language set retained.
-- Additive schema migration for existing `inquiry` tables; PostgreSQL support retained.
+## Important limitations
+- The uploaded project ZIP was inspected and modified. The remote GitHub repository was not changed; authenticated write access was not available in this session.
+- No live Render deployment was triggered.
+- No production penetration test, independent code audit, or live WhatsApp delivery test was performed.
+- Free Render hosting cannot provide permanent uptime or durable case storage. Free Postgres expires after 30 days; local filesystem data is ephemeral. See `RENDER_FREE_LIMITS.md`.
+- `memory://` rate limiting is process-local and resets on restart. The public intake endpoint has a configurable 30/hour IP limit, but the app-wide 50/hour default can also apply. This is acceptable for a one-instance demo only.
+- Admin MFA, per-action audit logging, email verification, attachment quarantine, replay/idempotency protection for concurrent duplicate submissions, and formal retention automation remain production hardening work.
 
-## Risk review model
-The current rules flag selected message patterns (credential requests, guaranteed-recovery claims and off-platform payment pressure). The displayed score is a prioritization hint only. It cannot prove a scam, verify a person's identity, authenticate evidence, or replace a human investigator. False positives and false negatives are expected. No external identity, sanctions, phone reputation or platform API checks are performed.
-
-## Deployment requirements
-- Python 3.12; `pip install -r requirements.txt`; `gunicorn --workers 1 --threads 4 --timeout 60 app:app`.
-- Render environment: `SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD` (14+ characters), `COOKIE_SECURE=1`, `ADMIN_URL_PREFIX=/private-inbox`, `WHATSAPP_NUMBER` (digits only), and a managed PostgreSQL `DATABASE_URL` for durable production data.
-- Admin sign-in: `/private-inbox/login`; dashboard: `/private-inbox`.
-
-## Production readiness review
-**Good baseline:** CSRF, password hashing, rate limiting, session cookie flags, security headers, admin no-cache/no-index, authenticated export and input limits.
-
-**Before real customer use:** connect managed PostgreSQL and automated backups; rotate any previously exposed admin password and secret; confirm `ADMIN_URL_PREFIX` is exactly `/private-inbox`; add email verification and a privacy/retention workflow; consider Cloudflare Turnstile or hCaptcha for stronger bot resistance; add audit logs, MFA, alerting, attachment quarantine/scanning and role-based access if the team grows. Do not collect passwords, OTPs, recovery keys, payment credentials or unnecessary identity documents.
-
-**Limitations:** no account restoration automation, no platform affiliation, no guaranteed outcomes, no autonomous scam verdict, and WhatsApp replies are not synchronized into the case database.
+## Test status
+Static syntax/structure and ZIP integrity checks should be run before release. A real deployment must also complete the manual end-to-end checklist in `FREE_HOSTING_AND_DOMAIN_GUIDE.md` and `SECURITY_ARCHITECTURE.md`.
