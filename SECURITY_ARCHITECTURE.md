@@ -140,7 +140,7 @@ Run after each deployment:
 1. `/health` returns 200.
 2. Public intake rejects missing CSRF, invalid arithmetic answer, missing authorization, invalid email, invalid evidence URL, and honeypot completion.
 3. A valid dummy report creates one case with one unique reference.
-4. The visitor activates the form’s sole **Send to WhatsApp** button. The server validates explicit sharing consent and the configured destination, commits the case, then responds with a 303 redirect to the full prefilled WhatsApp message. The visitor must still press Send manually inside WhatsApp.
+4. The visitor activates the form’s sole **Send to WhatsApp** button. The same-origin request must receive a successful response only after the server commits the case; the browser then navigates to the validated full prefilled WhatsApp message. The no-JavaScript path receives a 303 only after commit. The visitor must still press Send manually inside WhatsApp.
 5. `0049...`, `+49...`, and `49...` produce the same `wa.me` number; malformed numbers do not redirect.
 6. WhatsApp draft is generated only after the database commit, requires explicit sharing consent, and contains the case reference, submitted fields, full description, and triage report. The visitor must press Send manually.
 7. Anonymous requests to every admin route are redirected to login.
@@ -151,5 +151,5 @@ Run after each deployment:
 12. A backup is restored into a separate test database successfully.
 
 
-## v12 single-submit hand-off
-The application no longer offers a choice between private inbox and WhatsApp. A valid POST is the one case-creation action; after a successful DB commit, the same browser tab is redirected to the server-generated WhatsApp chat URL. The URL carries the full case summary and triage report and is therefore treated as sensitive; the response is no-store and uses `Referrer-Policy: no-referrer`. The website cannot press Send or confirm delivery using a normal `wa.me` link.
+## Final submission reliability controls
+The application has one public case submission action. The browser POST uses JSON and refuses automatic redirect following; it only navigates after validating the successful server response and the `https://wa.me/<digits>` destination. The no-JavaScript path still redirects only after commit. Signed per-form references make retry idempotent, unique constraints handle simultaneous duplicate requests, PostgreSQL connection/pool/statement/lock waits and SQLite lock waits are bounded, `/health/db` checks database reachability, and support-reference logs identify the failing stage without including submitted PII. The complete message URL is treated as sensitive; responses are no-store and use `Referrer-Policy: no-referrer`. A normal `wa.me` link cannot press Send or confirm delivery.

@@ -56,7 +56,7 @@ def test_whatsapp_message_contains_all_submitted_fields_and_full_triage_report()
 
 
 def test_message_is_encoded_as_prefilled_whatsapp_text():
-    url = build_case_whatsapp_url("+49 176 4248 4892", SampleCase())
+    url = build_case_whatsapp_url("+49 30 1234567", SampleCase())
     parsed = urlparse(url)
     text = parse_qs(parsed.query)["text"][0]
     assert SampleCase.case_ref in text
@@ -66,7 +66,7 @@ def test_message_is_encoded_as_prefilled_whatsapp_text():
 
 def test_invalid_destination_does_not_build_external_url():
     assert build_case_whatsapp_url("not a phone number", SampleCase()) is None
-    assert build_case_whatsapp_url("0049 0176 42484892", SampleCase()) is None
+    assert build_case_whatsapp_url("0049 0123 456789", SampleCase()) is None
 
 
 def test_german_international_digits_only_number_is_valid():

@@ -1,26 +1,29 @@
-# YAKUZA v12 build verification
+# Build verification — final reliability repair
 
-Validation performed against the exact v12 source tree included in this archive:
+Validation performed against this source tree:
 
-- `pytest -q`: 32 tests passed.
-- `python -m py_compile app.py security_utils.py whatsapp_utils.py`: passed.
-- Python AST parsing: passed.
+- `pytest -q`: 42 tests passed.
+- Python `compileall`: passed for `app.py`, `security_utils.py`, and `whatsapp_utils.py`.
+- Python AST parsing for all project `.py` files: passed.
 - `node --check static/js/app.js`: passed.
-- Jinja syntax parsing: all 9 remaining HTML templates passed.
-- Render YAML parse: passed; the web service health-check path is `/health`.
+- Jinja syntax parsing for every HTML template: passed (9 templates).
+- `render.yaml` parsed successfully as YAML.
 - `bash -n COMMIT_UPDATE.sh`: passed.
-- ZIP integrity and SHA-256: verified after packaging.
-- No new runtime dependency introduced.
+- Actual SQLAlchemy SQLite connection smoke test (`SELECT 1`) using the configured bounded engine options: passed; legacy-table unique-index migration and duplicate-blocking behavior: passed. The full Flask app itself was not started because Flask, Flask-SQLAlchemy and related Flask dependencies were unavailable in this execution environment.
+- ZIP CRC/integrity and SHA-256: verified after packaging.
 
-## One-button WhatsApp behavior
+## Changes specifically targeting the stuck submission
 
-1. The public case form contains one submit button labelled **Send to WhatsApp**; the contact method selection and receipt template are removed.
-2. The visitor must explicitly consent to sharing the submitted case details through WhatsApp.
-3. The server validates the destination, flushes the new case, builds the full prefilled message, and commits the case.
-4. The server responds with HTTP 303 to the server-generated `https://wa.me/<number>?text=...` URL only after the commit succeeds.
-5. A missing/invalid destination or database exception rolls back and prevents the redirect.
-6. WhatsApp opens the prefilled draft. The visitor must inspect and press Send; the website cannot send from their account or verify final delivery via a standard click-to-chat link.
+- Added PostgreSQL connect timeout, SQLAlchemy pool checkout timeout, server-side statement timeout and lock timeout.
+- Added bounded SQLite lock wait.
+- Added an explicit migration for the unique case-reference index on existing databases; startup detects duplicate pre-existing references and fails with a specific migration error rather than silently allowing duplicate cases.
+- Added a protected, per-form signed reference. Retries after an uncertain network response reuse an already committed case.
+- Kept exactly one public form submit control.
+- Browser AJAX now explicitly refuses HTTP redirects (`redirect: error`). A successful JSON result must be received before the same tab is navigated to the server-generated `https://wa.me/` destination. This prevents a 303 from being followed invisibly inside `fetch`.
+- Added progress states at 8 and 18 seconds and a 120-second client timeout; the decorative spinner stops after 8 seconds while accessible status text remains.
+- Added a database diagnostic route at `/health/db`.
+- Added support references and phase-level logs that omit submitted personally identifying information.
 
-## Not verified in this environment
+## Not verified in this execution environment
 
-The execution environment did not have Flask/Flask-SQLAlchemy/Flask-WTF installed and package-index access was unavailable, so the Flask application was not started and database/route integration tests were not performed. Real Render deployment, production PostgreSQL commit behavior, WhatsApp application launch, and delivery to the destination number require staging/production testing.
+Flask, Flask-SQLAlchemy, Flask-WTF, Flask-Limiter, WTForms, psycopg and Gunicorn were not installed here; package-index/network access was unavailable. Therefore this environment could not launch the full Flask app or execute a Flask test-client submission against a live database. No live Render deploy, production database commit, Android/iOS/desktop WhatsApp launch, or actual message delivery was performed. The ZIP is source-validated, not a claim of live production verification.

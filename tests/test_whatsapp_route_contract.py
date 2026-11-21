@@ -14,9 +14,11 @@ def test_case_is_committed_before_external_redirect():
     start = source.index("def contact():")
     end = source.index("@app.get('/privacy')", start)
     route = source[start:end]
-    assert route.index("db.session.commit()") < route.index("response = redirect(whatsapp_url, code=303)")
+    assert route.index("db.session.commit()") < route.index("return whatsapp_success(whatsapp_url, submitted_ref, wants_json)")
+    helper = source[source.index("def whatsapp_success("):source.index("@app.errorhandler(CSRFError)")]
+    assert "response = redirect(whatsapp_url, code=303)" in helper
     assert "db.session.rollback()" in route
-    assert "Case intake could not be committed" in route
+    assert "intake_failure" in route and "Case intake could not be committed" not in route
 
 
 def test_whatsapp_url_is_server_generated_and_configuration_checked_before_commit():

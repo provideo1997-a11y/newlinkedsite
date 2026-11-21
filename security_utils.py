@@ -50,3 +50,72 @@ def csv_safe(value) -> str:
     if candidate.startswith(("=", "+", "-", "@")):
         return "'" + text
     return text
+
+
+def sqlalchemy_engine_options(database_uri: str) -> dict:
+    """Return bounded SQLAlchemy pool/driver timeouts for the configured database.
+
+    PostgreSQL uses psycopg 3. A connection attempt, lock wait, or statement is
+    bounded so an unavailable database cannot leave an intake request waiting
+    until the web worker is killed. SQLite receives a bounded lock wait too.
+    """
+    uri = (database_uri or "").strip().lower()
+    options = {"pool_pre_ping": True, "pool_recycle": 300}
+    if uri.startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
+        options.update({
+            "pool_size": 2,
+            "max_overflow": 1,
+            "pool_timeout": 5,
+            "connect_args": {
+                "connect_timeout": 5,
+                "options": (
+                    "-c statement_timeout=12000 "
+                    "-c lock_timeout=5000 "
+                    "-c idle_in_transaction_session_timeout=15000"
+                ),
+            },
+        })
+    elif uri.startswith("sqlite:"):
+        options["connect_args"] = {"timeout": 5}
+    return options
+
+
+def ensure_unique_case_reference_index(engine) -> bool:
+    """Ensure an existing Inquiry table enforces unique, non-null case references.
+
+    SQLAlchemy ``create_all`` does not add constraints/indexes to a table that
+    already existed before the model gained ``unique=True``. The idempotent
+    intake path relies on this invariant for concurrent retries, so add an
+    explicit unique index when the database lacks one. Returns True only when
+    an index was created. Existing duplicate non-null references are reported
+    as a migration error instead of silently weakening duplicate protection.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    if "case_ref" not in {column["name"] for column in inspector.get_columns("inquiry")}:
+        raise RuntimeError("The inquiry.case_ref migration must run before its unique index migration.")
+
+    for index in inspector.get_indexes("inquiry"):
+        if index.get("unique") and index.get("column_names") == ["case_ref"]:
+            return False
+    for constraint in inspector.get_unique_constraints("inquiry"):
+        if constraint.get("column_names") == ["case_ref"]:
+            return False
+
+    with engine.connect() as connection:
+        duplicate = connection.execute(text(
+            "SELECT case_ref FROM inquiry "
+            "WHERE case_ref IS NOT NULL "
+            "GROUP BY case_ref HAVING COUNT(*) > 1 LIMIT 1"
+        )).first()
+    if duplicate:
+        raise RuntimeError(
+            "Duplicate non-null inquiry.case_ref values exist. Resolve them before enabling safe case retries."
+        )
+
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_inquiry_case_ref ON inquiry (case_ref)"
+        ))
+    return True

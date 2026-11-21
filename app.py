@@ -1,18 +1,21 @@
 import os, secrets, csv, io, re, uuid, random
 from datetime import datetime, timezone, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
-from flask_wtf.csrf import CSRFProtect
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from wtforms import StringField, EmailField, SelectField, TextAreaField, PasswordField, SubmitField
+from wtforms import StringField, EmailField, SelectField, TextAreaField, PasswordField, SubmitField, HiddenField
 from wtforms.validators import DataRequired, Email, Length, Optional, Regexp
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import desc
-from security_utils import normalize_database_url, merge_locale_translations, csv_safe
+from sqlalchemy.exc import IntegrityError
+from time import perf_counter
+from itsdangerous import URLSafeTimedSerializer, BadSignature
+from security_utils import normalize_database_url, merge_locale_translations, csv_safe, sqlalchemy_engine_options, normalize_whatsapp_number, ensure_unique_case_reference_index
 from whatsapp_utils import build_case_whatsapp_url
 
 app = Flask(__name__, instance_relative_config=True)
@@ -26,14 +29,15 @@ if not ADMIN_URL_PREFIX.startswith('/') or ADMIN_URL_PREFIX.startswith('//') or 
     raise RuntimeError('ADMIN_URL_PREFIX must be a safe absolute URL path.')
 ADMIN_URL_PREFIX = ADMIN_URL_PREFIX.rstrip('/') or '/private-inbox'
 
+_DATABASE_URI = normalize_database_url(
+    os.environ.get('DATABASE_URL'),
+    'sqlite:///' + os.path.join(app.instance_path, 'yakuza.db')
+)
 app.config.update(
     SECRET_KEY=os.environ.get('SECRET_KEY') or secrets.token_hex(32),
-    SQLALCHEMY_DATABASE_URI=normalize_database_url(
-        os.environ.get('DATABASE_URL'),
-        'sqlite:///' + os.path.join(app.instance_path, 'yakuza.db')
-    ),
+    SQLALCHEMY_DATABASE_URI=_DATABASE_URI,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True},
+    SQLALCHEMY_ENGINE_OPTIONS=sqlalchemy_engine_options(_DATABASE_URI),
     SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','0') == '1',
     WTF_CSRF_TIME_LIMIT=3600,
@@ -522,6 +526,33 @@ UI_COPY = {'en': {'skip_to_content': 'Skip to main content',
 for _locale, _copy in UI_COPY.items():
     LANGS[_locale].update(_copy)
 
+
+# Intake submission progress/errors. These are used by the AJAX path while
+# the same endpoint retains a normal HTML form fallback when JavaScript is off.
+INTAKE_STATUS_COPY = {
+'en': {'saving':'Saving your case securely…','waiting':'The server is still processing your request. Keep this page open.','timeout':'No response was received in time. Your case may already have been saved. Press the same Send to WhatsApp button again; the case reference prevents duplicates.','network_error':'The connection was interrupted. Check your connection and press the same Send to WhatsApp button again.','saved':'Case saved. Opening WhatsApp…','invalid_response':'The server returned an unexpected response. Please retry using the same button.','form_error':'Please check the highlighted fields and try again.','csrf_error':'Your form session expired. Reload this page and submit again.'},
+'fr': {'saving':'Enregistrement sécurisé de votre dossier…','waiting':'Le serveur traite toujours votre demande. Gardez cette page ouverte.','timeout':'Aucune réponse dans le délai prévu. Votre dossier a peut-être déjà été enregistré. Cliquez à nouveau sur le même bouton ; la référence évite les doublons.','network_error':'La connexion a été interrompue. Vérifiez votre connexion puis cliquez à nouveau sur le même bouton.','saved':'Dossier enregistré. Ouverture de WhatsApp…','invalid_response':'Réponse inattendue du serveur. Réessayez avec le même bouton.','form_error':'Vérifiez les champs signalés puis réessayez.','csrf_error':'Votre session a expiré. Rechargez la page puis réessayez.'},
+'ar': {'saving':'جارٍ حفظ ملفك بأمان…','waiting':'ما زال الخادم يعالج طلبك. اترك الصفحة مفتوحة.','timeout':'لم يصل رد في الوقت المحدد. ربما تم حفظ ملفك بالفعل. اضغط زر الإرسال نفسه مجدداً؛ رقم الملف يمنع التكرار.','network_error':'انقطع الاتصال. تحقق من الشبكة واضغط زر الإرسال نفسه مجدداً.','saved':'تم حفظ الملف. جارٍ فتح واتساب…','invalid_response':'وصل رد غير متوقع من الخادم. أعد المحاولة بالزر نفسه.','form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.','csrf_error':'انتهت صلاحية الجلسة. أعد تحميل الصفحة ثم أرسل الطلب.'},
+'ar-tn': {'saving':'قاعدين نحفظو الملف متاعك بأمان…','waiting':'السيرفر مازال يعالج في الطلب. خلّي الصفحة محلولة.','timeout':'ما وصلناش رد في الوقت المحدد. ينجم الملف يكون تسجّل. اضغط نفس زر الإرسال مرة أخرى؛ رقم الملف يمنع التكرار.','network_error':'الاتصال تقصّ. تثبّت من الإنترنت واضغط نفس زر الإرسال مرة أخرى.','saved':'الملف تسجّل. قاعدين نحلّو واتساب…','invalid_response':'السيرفر رجّع إجابة غير متوقعة. عاود بنفس الزر.','form_error':'راجع الخانات المعلّمة وعاود المحاولة.','csrf_error':'الجلسة وفات. حدّث الصفحة وعاود ابعث.'},
+'es': {'saving':'Guardando tu caso de forma segura…','waiting':'El servidor sigue procesando tu solicitud. Mantén esta página abierta.','timeout':'No llegó respuesta a tiempo. Es posible que el caso ya se haya guardado. Pulsa otra vez el mismo botón; la referencia evita duplicados.','network_error':'Se interrumpió la conexión. Comprueba la conexión y vuelve a pulsar el mismo botón.','saved':'Caso guardado. Abriendo WhatsApp…','invalid_response':'El servidor devolvió una respuesta inesperada. Reintenta con el mismo botón.','form_error':'Revisa los campos señalados y vuelve a intentarlo.','csrf_error':'La sesión del formulario caducó. Recarga la página e inténtalo de nuevo.'},
+'de': {'saving':'Dein Fall wird sicher gespeichert…','waiting':'Der Server verarbeitet deine Anfrage noch. Lass diese Seite geöffnet.','timeout':'Rechtzeitig kam keine Antwort. Dein Fall wurde möglicherweise bereits gespeichert. Klicke erneut auf dieselbe Schaltfläche; die Referenz verhindert Duplikate.','network_error':'Die Verbindung wurde unterbrochen. Prüfe deine Verbindung und klicke erneut auf dieselbe Schaltfläche.','saved':'Fall gespeichert. WhatsApp wird geöffnet…','invalid_response':'Unerwartete Serverantwort. Bitte mit derselben Schaltfläche erneut versuchen.','form_error':'Bitte prüfe die markierten Felder und versuche es erneut.','csrf_error':'Deine Sitzung ist abgelaufen. Lade die Seite neu und sende erneut.'},
+'it': {'saving':'Salvataggio sicuro del caso…','waiting':'Il server sta ancora elaborando la richiesta. Mantieni aperta questa pagina.','timeout':'Nessuna risposta entro il tempo previsto. Il caso potrebbe essere già stato salvato. Premi di nuovo lo stesso pulsante; il riferimento evita duplicati.','network_error':'La connessione si è interrotta. Verifica la connessione e premi di nuovo lo stesso pulsante.','saved':'Caso salvato. Apertura di WhatsApp…','invalid_response':'Risposta del server inattesa. Riprova con lo stesso pulsante.','form_error':'Controlla i campi evidenziati e riprova.','csrf_error':'La sessione è scaduta. Ricarica la pagina e invia di nuovo.'},
+'pt': {'saving':'A guardar o seu caso em segurança…','waiting':'O servidor continua a processar o pedido. Mantenha esta página aberta.','timeout':'Não recebemos resposta a tempo. O caso pode já ter sido guardado. Prima novamente o mesmo botão; a referência evita duplicados.','network_error':'A ligação foi interrompida. Verifique a ligação e prima novamente o mesmo botão.','saved':'Caso guardado. A abrir o WhatsApp…','invalid_response':'Resposta inesperada do servidor. Tente novamente com o mesmo botão.','form_error':'Verifique os campos assinalados e tente novamente.','csrf_error':'A sessão expirou. Atualize a página e envie novamente.'},
+ 'tr': {'saving':'Dosyanız güvenli şekilde kaydediliyor…','waiting':'Sunucu isteğinizi işlemeye devam ediyor. Bu sayfayı açık tutun.','timeout':'Zamanında yanıt alınamadı. Dosyanız kaydedilmiş olabilir. Aynı düğmeye tekrar basın; referans numarası yinelenen kayıtları önler.','network_error':'Bağlantı kesildi. Bağlantınızı kontrol edip aynı düğmeye tekrar basın.','saved':'Dosya kaydedildi. WhatsApp açılıyor…','invalid_response':'Sunucudan beklenmeyen yanıt. Aynı düğmeyle tekrar deneyin.','form_error':'Lütfen işaretli alanları kontrol edip yeniden deneyin.','csrf_error':'Oturumunuzun süresi doldu. Sayfayı yenileyip tekrar gönderin.'},
+'zh': {'saving':'正在安全保存案件…','waiting':'服务器仍在处理请求。请保持此页面打开。','timeout':'未能及时收到响应。案件可能已经保存。请再次点击同一个发送按钮；案件编号可防止重复记录。','network_error':'连接中断。请检查网络后再次点击同一个按钮。','saved':'案件已保存。正在打开 WhatsApp…','invalid_response':'服务器返回了意外响应。请使用同一个按钮重试。','form_error':'请检查标记的字段后重试。','csrf_error':'表单会话已过期。请刷新页面后重新提交。'},
+'ja': {'saving':'ケースを安全に保存しています…','waiting':'サーバーがまだリクエストを処理しています。このページを開いたままにしてください。','timeout':'時間内に応答がありませんでした。ケースは既に保存されている可能性があります。同じ送信ボタンをもう一度押してください。参照番号により重複を防ぎます。','network_error':'接続が中断されました。接続を確認し、同じボタンをもう一度押してください。','saved':'ケースを保存しました。WhatsApp を開いています…','invalid_response':'サーバーから予期しない応答がありました。同じボタンで再試行してください。','form_error':'強調表示された項目を確認して再試行してください。','csrf_error':'フォームセッションの有効期限が切れました。ページを再読み込みして再送信してください。'}
+}
+for _locale, _copy in INTAKE_STATUS_COPY.items():
+    LANGS[_locale].update({f'intake_{key}': value for key, value in _copy.items()})
+
+INTAKE_ERROR_COPY = {'en': {'intake_form_error': 'Please check the form fields and try again.', 'intake_csrf_error': 'Your form session expired. Reload the page and submit again.'}, 'fr': {'intake_form_error': 'Vérifiez les champs du formulaire puis réessayez.', 'intake_csrf_error': 'Votre session a expiré. Rechargez la page puis réessayez.'}, 'ar': {'intake_form_error': 'يرجى مراجعة حقول النموذج ثم المحاولة مجدداً.', 'intake_csrf_error': 'انتهت صلاحية الجلسة. أعد تحميل الصفحة ثم أرسل الطلب.'}, 'ar-tn': {'intake_form_error': 'راجع معلومات الفورم وعاود المحاولة.', 'intake_csrf_error': 'الجلسة وفات. حدّث الصفحة وعاود ابعث.'}, 'es': {'intake_form_error': 'Comprueba los campos del formulario y vuelve a intentarlo.', 'intake_csrf_error': 'La sesión caducó. Recarga la página y envía de nuevo.'}, 'de': {'intake_form_error': 'Bitte prüfe die Formularfelder und versuche es erneut.', 'intake_csrf_error': 'Deine Sitzung ist abgelaufen. Lade die Seite neu und sende erneut.'}, 'it': {'intake_form_error': 'Controlla i campi del modulo e riprova.', 'intake_csrf_error': 'La sessione è scaduta. Ricarica la pagina e invia di nuovo.'}, 'pt': {'intake_form_error': 'Verifique os campos do formulário e tente novamente.', 'intake_csrf_error': 'A sessão expirou. Atualize a página e envie novamente.'}, 'tr': {'intake_form_error': 'Lütfen form alanlarını kontrol edip yeniden deneyin.', 'intake_csrf_error': 'Oturumunuz sona erdi. Sayfayı yenileyip tekrar gönderin.'}, 'zh': {'intake_form_error': '请检查表单字段后重试。', 'intake_csrf_error': '会话已过期。请刷新页面后重新提交。'}, 'ja': {'intake_form_error': 'フォームの項目を確認して再試行してください。', 'intake_csrf_error': 'セッションの有効期限が切れました。ページを再読み込みして再送信してください。'}}
+for _locale, _copy in INTAKE_ERROR_COPY.items():
+    LANGS[_locale].update(_copy)
+
+INTAKE_RATE_LIMIT_COPY = {'en': {'intake_rate_limited': 'Too many submissions from this connection. Please wait before trying again.'}, 'fr': {'intake_rate_limited': 'Trop de demandes depuis cette connexion. Veuillez patienter avant de réessayer.'}, 'ar': {'intake_rate_limited': 'تم إرسال طلبات كثيرة من هذا الاتصال. يرجى الانتظار قبل إعادة المحاولة.'}, 'ar-tn': {'intake_rate_limited': 'بعثت برشة طلبات من نفس الاتصال. استنّى شوية وبعد عاود.'}, 'es': {'intake_rate_limited': 'Demasiados envíos desde esta conexión. Espera antes de volver a intentarlo.'}, 'de': {'intake_rate_limited': 'Zu viele Anfragen von dieser Verbindung. Bitte warte, bevor du es erneut versuchst.'}, 'it': {'intake_rate_limited': 'Troppe richieste da questa connessione. Attendi prima di riprovare.'}, 'pt': {'intake_rate_limited': 'Demasiados pedidos desta ligação. Aguarde antes de tentar novamente.'}, 'tr': {'intake_rate_limited': 'Bu bağlantıdan çok fazla gönderim yapıldı. Tekrar denemeden önce bekleyin.'}, 'zh': {'intake_rate_limited': '此连接提交次数过多。请稍后再试。'}, 'ja': {'intake_rate_limited': 'この接続からの送信が多すぎます。時間をおいて再試行してください。'}}
+for _locale, _copy in INTAKE_RATE_LIMIT_COPY.items():
+    LANGS[_locale].update(_copy)
+
 class InquiryForm(FlaskForm):
     name=StringField(validators=[DataRequired(),Length(min=2,max=100)])
     email=EmailField(validators=[DataRequired(),Email(),Length(max=180)])
@@ -537,10 +568,30 @@ class InquiryForm(FlaskForm):
     platform=SelectField(choices=[('not-specified','Not specified'),('instagram','Instagram'),('facebook','Facebook'),('tiktok','TikTok'),('google','Google'),('x','X'),('linkedin','LinkedIn'),('other','Other')], validators=[DataRequired()])
     website=StringField(validators=[Optional(),Length(max=0)])
     whatsapp_consent=StringField(validators=[Optional(),Length(max=3)])
+    case_token=HiddenField(validators=[DataRequired(), Length(max=255)])
     submit=SubmitField()
 class LoginForm(FlaskForm):
     username=StringField(validators=[DataRequired(),Length(max=80)])
     password=PasswordField(validators=[DataRequired(),Length(max=200)])
+
+_case_token_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='yakuza-case-intake-v1')
+
+def issue_case_token():
+    """Issue an independently signed reference + human challenge for each form tab."""
+    case_ref = 'YKZ-' + datetime.now(timezone.utc).strftime('%y%m%d') + '-' + secrets.token_hex(6).upper()
+    a, b = random.randint(2, 9), random.randint(1, 9)
+    token = _case_token_serializer.dumps({'ref': case_ref, 'a': a, 'b': b})
+    return token, f'{a} + {b}'
+
+def read_case_token(token):
+    payload = _case_token_serializer.loads(token or '', max_age=3600)
+    if (not isinstance(payload, dict)
+            or not re.fullmatch(r'YKZ-[0-9]{6}-[A-F0-9]{12}', str(payload.get('ref', '')))
+            or not isinstance(payload.get('a'), int)
+            or not isinstance(payload.get('b'), int)
+            or not (2 <= payload['a'] <= 9 and 1 <= payload['b'] <= 9)):
+        raise BadSignature('Invalid intake token payload')
+    return payload
 
 class Inquiry(db.Model):
     id=db.Column(db.Integer,primary_key=True)
@@ -577,6 +628,10 @@ def language_and_security():
         return redirect(request.path)
 @app.after_request
 def security_headers(resp):
+    if request.path == '/contact':
+        resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        resp.headers['Pragma'] = 'no-cache'
+        resp.headers['Referrer-Policy'] = 'no-referrer'
     if request.path == ADMIN_URL_PREFIX or request.path.startswith(ADMIN_URL_PREFIX + '/'):
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
         resp.headers['Pragma'] = 'no-cache'
@@ -591,86 +646,215 @@ def home(): return render_template('index.html')
 def services(): return render_template('services.html')
 @app.get('/about')
 def about(): return render_template('about.html')
-@app.route('/contact',methods=['GET','POST'])
+@app.route('/contact', methods=['GET', 'POST'])
 @limiter.limit(os.environ.get('INTAKE_RATE_LIMIT', '30 per hour'), methods=['POST'])
 def contact():
-    form=InquiryForm()
-    if 'human_a' not in session:
-        a,b=random.randint(2,9),random.randint(1,9); session['human_a']=a; session['human_b']=b
-    human_question=f"{session['human_a']} + {session['human_b']}"
-    if form.validate_on_submit():
-        if form.website.data: abort(400)
-        expected=str(session.get('human_a',-100)+session.get('human_b',-100))
-        if not secrets.compare_digest(form.human_answer.data.strip(),expected):
-            flash('Human verification failed. Please solve the new check and try again.','error')
-            a,b=random.randint(2,9),random.randint(1,9); session['human_a']=a; session['human_b']=b
-            return render_template('contact.html',form=form,human_question=f"{a} + {b}")
-        if form.authorization.data != 'yes': abort(400)
-        # This intake has one delivery path: WhatsApp. Require explicit consent before storing
-        # any report details for inclusion in the prefilled third-party message.
-        if form.whatsapp_consent.data != 'yes':
-            flash(tr('whatsapp_consent_required'), 'error')
-            return render_template('contact.html', form=form, human_question=human_question), 400
+    """One-button intake: commit idempotently, then navigate to WhatsApp.
 
-        configured_whatsapp = os.environ.get('WHATSAPP_NUMBER', '')
-        if form.evidence_url.data:
-            from urllib.parse import urlsplit, urlunsplit
-            raw_evidence = form.evidence_url.data.strip()
-            parsed = urlsplit(raw_evidence)
-            if (parsed.scheme.lower() != 'https' or not parsed.hostname or
-                    parsed.username or parsed.password or
-                    any(ord(ch) < 32 for ch in raw_evidence)):
-                form.evidence_url.errors.append('Enter a valid public HTTPS link without embedded credentials.')
-                return render_template('contact.html', form=form, human_question=human_question)
-            # Store a canonical URL; links are opened with noopener in the report UI.
-            form.evidence_url.data = urlunsplit(('https', parsed.netloc.lower(), parsed.path or '/', parsed.query, ''))
-        message=form.message.data.strip()
-        # Heuristic triage flags are review prompts, never a verdict about a person or organization.
-        patterns=[('credential_request',r'password|one.time code|otp|2fa code|recovery code'),('guaranteed_recovery_claim',r'guaranteed recovery|100% recovery|instant recovery'),('off_platform_payment_pressure',r'pay.*crypto|gift card|wire transfer|urgent payment')]
-        flags=[label for label,pat in patterns if re.search(pat,message,re.I)]
-        score=min(90,len(flags)*25 + (20 if form.urgency.data=='critical' else 10 if form.urgency.data=='high' else 0))
-        report=("Automated intake triage — review required, not a fraud determination.\n"
-                f"Priority: {form.urgency.data.upper()}\nRisk indicators: {', '.join(flags) if flags else 'No configured text indicators detected'}\n"
-                "Recommended checks: confirm account ownership through official platform channels; inspect timestamps and original notifications; preserve unedited evidence; never request passwords, OTPs, recovery keys, or remote access.\n"
-                "Limitations: text heuristics can produce false positives and false negatives. A human reviewer must assess context.")
-        ref='YKZ-'+datetime.now(timezone.utc).strftime('%y%m%d')+'-'+uuid.uuid4().hex[:12].upper()
-        # Preserve the original user-entered narrative exactly; platform is stored
-        # separately and is included as its own field in the case report/message.
-        item=Inquiry(case_ref=ref,name=form.name.data.strip(),email=form.email.data.strip().lower(),topic=form.topic.data,message=message,
-            platform=form.platform.data,phone=form.phone.data.strip(),incident_date=form.incident_date.data.strip(),
-            account_handle=form.account_handle.data.strip(),evidence_url=form.evidence_url.data.strip(),urgency=form.urgency.data,
-            risk_score=score,risk_flags=', '.join(flags),triage_report=report,contact_method='whatsapp')
+    The signed per-form token prevents duplicate records even if the browser
+    times out after COMMIT and retries. Each tab receives its own token.
+    """
+    wants_json = (
+        request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        or 'application/json' in request.headers.get('Accept', '')
+    )
+    form = InquiryForm()
+    support_reference = uuid.uuid4().hex[:12].upper()
+
+    def error(message, status=400, renew_token=False, code=None):
+        question = '— + —'
+        token_refreshed = False
+        if renew_token:
+            form.case_token.data, question = issue_case_token()
+            form.human_answer.data = ''
+            token_refreshed = True
+        else:
+            try:
+                payload = read_case_token(form.case_token.data)
+                question = f"{payload['a']} + {payload['b']}"
+            except BadSignature:
+                form.case_token.data, question = issue_case_token()
+                token_refreshed = True
+        if wants_json:
+            response_payload = {'ok': False, 'error': message, 'support_reference': support_reference}
+            if code:
+                response_payload['code'] = code
+            if token_refreshed:
+                response_payload.update({'case_token': form.case_token.data, 'human_question': question})
+            return jsonify(response_payload), status
+        flash(message if not code else f'{message} (Reference: {support_reference})', 'error')
+        return render_template('contact.html', form=form, human_question=question), status
+
+    if request.method == 'GET':
+        form.case_token.data, human_question = issue_case_token()
+        return render_template('contact.html', form=form, human_question=human_question)
+
+    if not form.validate_on_submit():
+        return error(tr('intake_form_error'), 400)
+
+    try:
+        token_data = read_case_token(form.case_token.data)
+    except BadSignature:
+        return error(tr('intake_csrf_error'), 400, renew_token=True)
+
+    submitted_ref = token_data['ref']
+    if form.website.data:
+        abort(400)
+    if form.authorization.data != 'yes':
+        return error(tr('intake_form_error'), 400)
+    if form.whatsapp_consent.data != 'yes':
+        return error(tr('whatsapp_consent_required'), 400)
+
+    configured_whatsapp = os.environ.get('WHATSAPP_NUMBER', '')
+    if not normalize_whatsapp_number(configured_whatsapp):
+        app.logger.error('intake_failure support_ref=%s stage=configuration reason=invalid_whatsapp_number', support_reference)
+        return error(tr('whatsapp_configuration_error'), 503, code='WHATSAPP_CONFIGURATION')
+
+    started = perf_counter()
+    stage = 'idempotency_lookup'
+    try:
+        # Idempotent replay: this lookup happens before re-checking the arithmetic
+        # answer, so retrying after a response timeout returns the same saved case.
+        existing = Inquiry.query.filter_by(case_ref=submitted_ref).first()
+        if existing is not None:
+            existing_url = build_case_whatsapp_url(configured_whatsapp, existing)
+            if not existing_url:
+                return error(tr('whatsapp_configuration_error'), 503)
+            app.logger.info('intake_reused case_ref=%s elapsed_ms=%d', submitted_ref, int((perf_counter() - started) * 1000))
+            return whatsapp_success(existing_url, submitted_ref, wants_json)
+    except Exception as exc:
+        db.session.rollback()
+        app.logger.error('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
+        return error(tr('case_save_failed'), 503, code='DATABASE_UNAVAILABLE')
+
+    expected_answer = str(token_data['a'] + token_data['b'])
+    if not secrets.compare_digest((form.human_answer.data or '').strip(), expected_answer):
+        return error('Human verification failed. Please solve the new check and try again.', 400, renew_token=True)
+
+    if form.evidence_url.data:
+        from urllib.parse import urlsplit, urlunsplit
+        raw_evidence = form.evidence_url.data.strip()
+        parsed = urlsplit(raw_evidence)
+        if (parsed.scheme.lower() != 'https' or not parsed.hostname or parsed.username or parsed.password
+                or any(ord(ch) < 32 for ch in raw_evidence)):
+            form.evidence_url.errors.append('Enter a valid public HTTPS link without embedded credentials.')
+            return error(tr('intake_form_error'), 400)
+        form.evidence_url.data = urlunsplit(('https', parsed.netloc.lower(), parsed.path or '/', parsed.query, ''))
+
+    message = form.message.data.strip()
+    patterns = [
+        ('credential_request', r'password|one.time code|otp|2fa code|recovery code'),
+        ('guaranteed_recovery_claim', r'guaranteed recovery|100% recovery|instant recovery'),
+        ('off_platform_payment_pressure', r'pay.*crypto|gift card|wire transfer|urgent payment'),
+    ]
+    flags = [label for label, pattern in patterns if re.search(pattern, message, re.I)]
+    score = min(90, len(flags) * 25 + (20 if form.urgency.data == 'critical' else 10 if form.urgency.data == 'high' else 0))
+    report = (
+        'Automated intake triage — review required, not a fraud determination.\n'
+        f'Priority: {form.urgency.data.upper()}\n'
+        f"Risk indicators: {', '.join(flags) if flags else 'No configured text indicators detected'}\n"
+        'Recommended checks: confirm account ownership through official platform channels; inspect timestamps and original notifications; preserve unedited evidence; never request passwords, OTPs, recovery keys, or remote access.\n'
+        'Limitations: text heuristics can produce false positives and false negatives. A human reviewer must assess context.'
+    )
+
+    try:
+        stage = 'case_prepare'
+        now = datetime.now(timezone.utc)
+        item = Inquiry(
+            case_ref=submitted_ref,
+            name=form.name.data.strip(),
+            email=form.email.data.strip().lower(),
+            topic=form.topic.data,
+            message=message,
+            platform=form.platform.data,
+            phone=form.phone.data.strip(),
+            incident_date=form.incident_date.data.strip(),
+            account_handle=form.account_handle.data.strip(),
+            evidence_url=form.evidence_url.data.strip(),
+            urgency=form.urgency.data,
+            risk_score=score,
+            risk_flags=', '.join(flags),
+            triage_report=report,
+            contact_method='whatsapp',
+            created_at=now,
+        )
         db.session.add(item)
-        try:
-            # Flush first so database defaults (including the timestamp) are populated.
-            # Build and validate the fixed wa.me target before commit; a bad/missing
-            # destination must not create an orphan case that cannot be handed off.
-            db.session.flush()
-            whatsapp_url = build_case_whatsapp_url(configured_whatsapp, item)
-            if not whatsapp_url:
-                db.session.rollback()
-                app.logger.error('WhatsApp intake blocked: WHATSAPP_NUMBER is missing or invalid.')
-                flash(tr('whatsapp_configuration_error'), 'error')
-                return render_template('contact.html', form=form, human_question=human_question), 503
+        stage = 'database_flush'
+        db.session.flush()
+        stage = 'whatsapp_message_build'
+        whatsapp_url = build_case_whatsapp_url(configured_whatsapp, item)
+        if not whatsapp_url:
+            db.session.rollback()
+            return error(tr('whatsapp_configuration_error'), 503)
+        stage = 'database_commit'
+        db.session.commit()
+        app.logger.info('intake_committed support_ref=%s case_ref=%s elapsed_ms=%d', support_reference, submitted_ref, int((perf_counter() - started) * 1000))
+        return whatsapp_success(whatsapp_url, submitted_ref, wants_json)
 
-            # The case is durably committed before the browser is redirected to WhatsApp.
-            db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        # A second request with the same signed token may have won the race.
+        try:
+            existing = Inquiry.query.filter_by(case_ref=submitted_ref).first()
+            if existing is not None:
+                existing_url = build_case_whatsapp_url(configured_whatsapp, existing)
+                if existing_url:
+                    app.logger.info('intake_idempotent_race_recovered case_ref=%s', submitted_ref)
+                    return whatsapp_success(existing_url, submitted_ref, wants_json)
+        except Exception as recovery_error:
+            db.session.rollback()
+            app.logger.error('intake_race_recovery_failed support_ref=%s case_ref=%s error_type=%s', support_reference, submitted_ref, type(recovery_error).__name__)
+        app.logger.error('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
+        return error(tr('case_save_failed'), 503, code='CASE_CONFLICT_OR_DATABASE_ERROR')
+    except Exception as exc:
+        db.session.rollback()
+        # A connection can fail after the database has committed but before the
+        # browser receives the response. Look up by the signed reference once;
+        # if it exists, hand off that record instead of prompting a new case.
+        try:
+            existing = Inquiry.query.filter_by(case_ref=submitted_ref).first()
+            if existing is not None:
+                existing_url = build_case_whatsapp_url(configured_whatsapp, existing)
+                if existing_url:
+                    app.logger.warning('intake_commit_result_recovered case_ref=%s', submitted_ref)
+                    return whatsapp_success(existing_url, submitted_ref, wants_json)
         except Exception:
             db.session.rollback()
-            app.logger.exception('Case intake could not be committed to the configured database.')
-            flash(tr('case_save_failed'), 'error')
-            return render_template('contact.html', form=form, human_question=human_question), 503
+        app.logger.error('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
+        return error(tr('case_save_failed'), 503, code='CASE_SAVE_FAILED')
 
-        session.pop('human_a',None); session.pop('human_b',None)
-        # One click performs the entire hand-off: POST creates the case, then 303
-        # navigates the same tab to the WhatsApp draft. WhatsApp still requires
-        # the visitor to review and press Send; the website cannot press Send.
+
+def whatsapp_success(whatsapp_url, case_ref, wants_json):
+    if wants_json:
+        response = jsonify({'ok': True, 'redirect_url': whatsapp_url, 'case_reference': case_ref})
+    else:
         response = redirect(whatsapp_url, code=303)
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Referrer-Policy'] = 'no-referrer'
-        return response
-    return render_template('contact.html',form=form,human_question=human_question)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
+
+
+@app.errorhandler(429)
+def handle_rate_limit(error):
+    message = tr('intake_rate_limited')
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', ''):
+        return jsonify({'ok': False, 'error': message}), 429
+    flash(message, 'error')
+    form = InquiryForm()
+    form.case_token.data, question = issue_case_token()
+    return render_template('contact.html', form=form, human_question=question), 429
+
+
+@app.errorhandler(CSRFError)
+def handle_csrf_error(error):
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', ''):
+        return jsonify({'ok': False, 'error': tr('intake_csrf_error'), 'reload': True}), 400
+    flash(tr('intake_csrf_error'), 'error')
+    form = InquiryForm()
+    form.case_token.data, question = issue_case_token()
+    return render_template('contact.html', form=form, human_question=question), 400
+
 @app.get('/privacy')
 def privacy(): return render_template('privacy.html')
 def admin_required(fn):
@@ -727,7 +911,18 @@ def update_case(case_id):
 @admin_required
 def admin_logout(): session.clear(); return redirect(url_for('home'))
 @app.get('/health')
-def health(): return {'status':'ok','service':'yakuza'},200
+def health(): return {'status':'ok','service':'yakuza'}, 200
+
+@app.get('/health/db')
+def database_health():
+    try:
+        from sqlalchemy import text as sql_text
+        db.session.execute(sql_text('SELECT 1'))
+        return {'status': 'ok', 'database': 'reachable'}, 200
+    except Exception as exc:
+        db.session.rollback()
+        app.logger.error('database_health_check_failed error_type=%s', type(exc).__name__)
+        return {'status': 'error', 'database': 'unavailable'}, 503
 with app.app_context():
     db.create_all()
     # Additive migration for existing SQLite/PostgreSQL deployments.
@@ -737,6 +932,9 @@ with app.app_context():
     for col,definition in additions.items():
         if col not in cols: db.session.execute(text(f'ALTER TABLE inquiry ADD COLUMN {col} {definition}'))
     db.session.commit()
+    # Existing databases upgraded with ALTER TABLE do not receive new model
+    # constraints automatically. Enforce uniqueness for idempotent retries.
+    ensure_unique_case_reference_index(db.engine)
     username=os.environ.get('ADMIN_USERNAME'); password=os.environ.get('ADMIN_PASSWORD')
     if username and password:
         admin=AdminUser.query.filter_by(username=username).first()

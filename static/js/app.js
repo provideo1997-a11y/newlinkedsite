@@ -94,34 +94,128 @@
 document.addEventListener('DOMContentLoaded',()=>{const field=document.getElementById('case-story');const count=document.getElementById('story-count');if(field&&count){const update=()=>{count.textContent=String(field.value.length);count.style.color=field.value.length>=25?'#c8ff3d':'#96a3a4'};field.addEventListener('input',update);update();}});
 
 
-// Prevent duplicate submissions, but never leave an unexplained endless spinner.
+// Reliable single-button intake. The POST returns JSON only after the case is
+// committed. The browser then navigates the current tab to the WhatsApp draft.
+// A bounded client timeout and server-side idempotency make retry safe.
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('case-intake-form');
   if (!form) return;
   const submit = form.querySelector('button[type="submit"], input[type="submit"]');
   const status = document.getElementById('case-submit-status');
-  let slowTimer = null;
-  form.addEventListener('submit', () => {
+  if (!submit) return;
+
+  const originalHTML = submit.innerHTML;
+  const originalLabel = submit.getAttribute('aria-label');
+  let activeController = null;
+  let activeTimers = [];
+  const clearTimers = () => { activeTimers.forEach(window.clearTimeout); activeTimers = []; };
+  const setStatus = message => { if (status) status.textContent = message || ''; };
+  const reset = message => {
+    clearTimers();
+    activeController = null;
+    form.removeAttribute('aria-busy');
+    delete form.dataset.submitting;
+    submit.disabled = false;
+    submit.classList.remove('is-submitting');
+    submit.innerHTML = originalHTML;
+    if (originalLabel) submit.setAttribute('aria-label', originalLabel);
+    else submit.removeAttribute('aria-label');
+    setStatus(message);
+  };
+
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
     if (form.dataset.submitting === '1') return;
+    if (!form.reportValidity()) return;
+
     form.dataset.submitting = '1';
     form.setAttribute('aria-busy', 'true');
-    if (submit) {
-      submit.disabled = true;
-      submit.classList.add('is-submitting');
-      submit.setAttribute('aria-label', submit.dataset.submittingLabel || 'Submitting request');
-    }
-    // A slow database/cold-start should produce a useful explanation, not an
-    // apparently permanent spinner. Keep the button disabled to avoid duplicate cases.
-    slowTimer = window.setTimeout(() => {
-      if (form.dataset.submitting === '1' && status) {
-        status.textContent = form.dataset.slowMessage || 'This is taking longer than expected. Keep this page open; do not submit again yet.';
-        if (submit) submit.classList.remove('is-submitting');
-      }
-    }, 15000);
-  });
-  window.addEventListener('pagehide', () => { if (slowTimer) window.clearTimeout(slowTimer); }, { once: true });
-});
+    submit.disabled = true;
+    submit.classList.add('is-submitting');
+    submit.setAttribute('aria-label', submit.dataset.submittingLabel || 'Sending to WhatsApp');
+    setStatus(form.dataset.savingMessage || 'Saving your case securely…');
 
+    const controller = new AbortController();
+    activeController = controller;
+    activeTimers.push(window.setTimeout(() => {
+      if (form.dataset.submitting === '1') {
+        setStatus(form.dataset.waitingMessage || 'The server is still processing your request.');
+        // Stop the decorative spinner while the request is outstanding; the
+        // accessible status text communicates the actual state.
+        submit.classList.remove('is-submitting');
+      }
+    }, 8000));
+    activeTimers.push(window.setTimeout(() => {
+      if (form.dataset.submitting === '1') setStatus(form.dataset.slowMessage || 'This is taking longer than expected.');
+    }, 18000));
+    // Render Free may need about a minute to wake from idle; leave enough time
+    // for that cold start. If it still fails, the same case reference is reused.
+    const timeout = window.setTimeout(() => controller.abort(), 120000);
+    activeTimers.push(timeout);
+
+    try {
+      const response = await fetch(form.action || window.location.pathname, {
+        method: 'POST',
+        body: new FormData(form),
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        // Never let fetch silently follow a WhatsApp 303 inside the background
+        // request. A successful AJAX response must be JSON; navigation happens
+        // only after this code validates its server-generated wa.me destination.
+        redirect: 'error',
+        signal: controller.signal,
+      });
+      const contentType = response.headers.get('content-type') || '';
+      const payload = contentType.toLowerCase().includes('application/json')
+        ? await response.json().catch(() => null)
+        : null;
+      if (payload && payload.case_token) {
+        const tokenField = form.querySelector('input[name=case_token]');
+        if (tokenField) tokenField.value = payload.case_token;
+      }
+      if (payload && payload.human_question) {
+        const question = document.getElementById('human-question');
+        const answer = document.getElementById('human_answer');
+        if (question) question.textContent = payload.human_question;
+        if (answer) answer.value = '';
+      }
+      if (payload && payload.reload) {
+        window.location.reload();
+        return;
+      }
+      if (!response.ok || !payload || payload.ok !== true || typeof payload.redirect_url !== 'string') {
+        let message = payload && payload.error ? payload.error : (!contentType.toLowerCase().includes('application/json')
+          ? `${form.dataset.invalidResponseMessage || 'Unexpected server response.'} (HTTP ${response.status})`
+          : (response.status ? `HTTP ${response.status}: ${form.dataset.invalidResponseMessage || 'Unexpected server response.'}` : (form.dataset.invalidResponseMessage || 'The server returned an unexpected response.')));
+        if (payload && payload.support_reference && response.status >= 500) message += ` (Support reference: ${payload.support_reference})`;
+        reset(message);
+        return;
+      }
+      const destination = new URL(payload.redirect_url);
+      if (destination.protocol !== 'https:' || destination.hostname !== 'wa.me' || !/^\/[0-9]{8,15}$/.test(destination.pathname)) {
+        reset(form.dataset.invalidResponseMessage || 'The server returned an unexpected WhatsApp destination.');
+        return;
+      }
+      clearTimers();
+      setStatus(form.dataset.savedMessage || 'Case saved. Opening WhatsApp…');
+      // Current-tab navigation is not a popup and keeps the single-click action reliable.
+      window.location.assign(destination.href);
+    } catch (error) {
+      const message = error && error.name === 'AbortError'
+        ? (form.dataset.timeoutMessage || 'No response arrived in time. You can safely retry with the same button.')
+        : (form.dataset.networkMessage || 'The connection was interrupted. Retry with the same button.');
+      reset(message);
+    }
+  });
+
+  window.addEventListener('pageshow', event => {
+    if (activeController) activeController.abort();
+    reset('');
+    // Returning from WhatsApp via browser Back gets a fresh signed case token.
+    if (event.persisted) window.location.reload();
+  });
+});
 
 // Admin list filtering is intentionally client-side and applies only to the 250 recent rows
 // that the server currently renders. The CSV export remains the full-data export path.

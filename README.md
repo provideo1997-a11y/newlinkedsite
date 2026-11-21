@@ -1,92 +1,93 @@
 # YAKUZA — Private Case Desk
 
-A Flask-based digital-risk intake and private case-management portal. This repository is a starter implementation, not a managed investigation service or a guarantee of account recovery.
+A Flask-based digital-risk intake and private case-management portal. This is software for collecting and organizing reports; it is not a managed investigation service, platform recovery provider, or guarantee of account recovery.
 
-## Local run
+## Local development
 
 ```bash
 python -m venv .venv
 # Windows: .venv\\Scripts\\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-copy .env.example .env  # Windows; configure values before running
+# Copy .env.example to .env and set local values before running
 python app.py
 ```
 
-For production, set environment variables in Render. Do not commit `.env`, credentials, customer data, SQLite databases, or backups.
+Do not commit `.env`, credentials, customer data, SQLite databases, uploads, or backups.
 
+## One-button WhatsApp case intake and reliability controls
 
-## Single-button WhatsApp case intake (v12)
+The public form has exactly one submit action: **Send to WhatsApp**. There is no contact-method selection, separate receipt page, second WhatsApp button, or alternative delivery path.
 
-The public intake form has exactly one delivery action: **Send to WhatsApp**. The visitor completes the form, checks the explicit WhatsApp data-sharing consent, and submits once. The server validates the configured destination, creates and commits the case, then responds with a `303` redirect to a prefilled `https://wa.me/` message containing the full case reference, requester and incident details, description, advisory indicators, and generated triage report. There is no contact-method choice, intermediate receipt page, second WhatsApp button, or fallback delivery option.
+The single action follows this order:
 
-The visitor must review the draft and press **Send** inside WhatsApp. A standard `wa.me` link cannot send from the visitor's account or notify the website whether the send completed. The message URL contains the submitted personal information and is shared with the WhatsApp service; the form therefore requires explicit consent. If `WHATSAPP_NUMBER` is invalid/missing or the database transaction fails, the transaction is rolled back and the app does not redirect to WhatsApp.
+1. Browser posts the form and CSRF token to the same-origin `/contact` endpoint.
+2. Server validates the form, signed per-form case token, authorization, explicit WhatsApp data-sharing consent, human challenge, and configured destination number.
+3. Server creates the case and triage report, builds the WhatsApp draft, flushes and commits the database transaction.
+4. Only after successful commit does the server return the prefilled WhatsApp destination. JavaScript validates that the destination is `https://wa.me/<digits>` and opens it in the same tab. Without JavaScript, the normal form receives a `303` redirect after commit.
 
-## UI release (v9)
+The request has bounded PostgreSQL connection, pool, lock, and statement waits; SQLite lock waits are also bounded. A 120-second browser timeout covers Render Free cold-start behavior. Each form has a signed, time-limited case reference, and startup ensures the database has a unique index for that reference (including older tables where `create_all` would not add a new constraint). Retry of the same form after a network timeout reuses the original committed case instead of creating a duplicate. If old data already contains duplicate non-null case references, startup stops with an explicit migration error so the records can be reconciled safely. A `support_reference` is returned for server-side failures, and application logs record the failing stage without logging submitted PII.
 
-This release keeps the existing Flask/Jinja, CSS and vanilla JavaScript stack and adds:
-- A keyboard skip link, labelled landmarks, current-page navigation state, explicit focus-visible styles, and more legible muted text.
-- A progressive loading overlay that is enabled only when JavaScript is available; users without JavaScript are not blocked by the loader.
-- Dashboard search and status filters for the 250 newest rows already loaded on the page. Filtering is client-side and does not change server-side case access or the complete CSV export.
-- Localized dashboard controls and accessibility labels in all 11 bundled admin locales.
-- Case-reference copy feedback, report printing, and print-specific styles.
-- Native browser form validation, a date input, and an accessible character-counter description.
+The browser fetch is configured not to follow redirects in the background. A successful JSON response is required before the page navigates to WhatsApp. An unexpected redirect or non-JSON response becomes a visible error instead of disappearing inside a fetch request.
 
-No frontend framework or new runtime dependency was added. See `UI_UX_REVIEW.md` for the source-based UI review, shipped changes, performance considerations and future roadmap.
+**WhatsApp limitation:** a `wa.me` click-to-chat link can open a chat with prefilled text, but cannot press Send from the visitor's account or confirm delivery. The visitor must review and press Send inside WhatsApp. The message contains the case details and triage report, so the form requires explicit consent. The submitted case is already saved before WhatsApp opens.
 
-## Render deployment
+## Deployment on Render
 
-- Root Directory: blank when the contents of this folder are at repository root.
+- Root Directory: blank when `app.py` is in the repository root.
+- Runtime: Python 3.12.
 - Build Command: `pip install -r requirements.txt`
 - Start Command: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
-- Health Check Path: `/health`
-- Runtime: Python 3.12
+- Basic health path: `/health`
+- Database diagnostic path: `/health/db` (returns 200 only when the database answers `SELECT 1`).
 
-Required environment variables:
-- `SECRET_KEY`: long random secret; rotate if exposed.
-- `ADMIN_USERNAME`: unique admin username.
-- `ADMIN_PASSWORD`: unique password with at least 16 characters.
-- `COOKIE_SECURE=1`
-- `ADMIN_URL_PREFIX=/private-inbox`
-- `WHATSAPP_NUMBER`: international phone number. The code normalizes `0049...`, `+49...`, and `49...` into the `wa.me` format.
-- `DATABASE_URL`: managed PostgreSQL connection string. Both `postgres://` and `postgresql://` are normalized to SQLAlchemy `postgresql+psycopg://` because the project installs psycopg 3.
-- `INTAKE_RATE_LIMIT=30 per hour` (per client IP; the application-wide default is also 50 requests/hour).
-- `RATELIMIT_STORAGE_URI=memory://` is process-local and resets when the service restarts. Keep one Render instance for this demo setting; use shared Redis-compatible storage before scaling.
+Required Render environment variables:
 
-### WhatsApp setup
+| Key | Value / rule |
+|---|---|
+| `SECRET_KEY` | Long random secret; keep stable across deploys and rotate if exposed. |
+| `ADMIN_USERNAME` | Your private admin username. |
+| `ADMIN_PASSWORD` | Unique password of at least 16 characters when first creating/resetting admin. |
+| `COOKIE_SECURE` | `1` |
+| `ADMIN_URL_PREFIX` | `/private-inbox` |
+| `WHATSAPP_NUMBER` | International digits only: country code followed by subscriber number, without `+`, spaces, `00`, or a domestic trunk zero. Keep the real number in Render Environment only. |
+| `DATABASE_URL` | A reachable PostgreSQL connection URL. Do not rely on SQLite for real case records. |
+| `INTAKE_RATE_LIMIT` | `30 per hour` by default; tune deliberately. |
+| `RATELIMIT_STORAGE_URI` | `memory://` only for the single-instance demo; use shared Redis-compatible storage when scaling. |
 
-In Render → your Web Service → Environment:
-1. Add the key `WHATSAPP_NUMBER`.
-2. Set its value to the full German international number in digits only: country code `49` followed by the subscriber number, without `+`, spaces, `00`, or the domestic trunk zero.
-3. Save changes and redeploy.
-4. Submit one controlled dummy case and tick the required WhatsApp data-sharing consent.
-5. The single form submission saves the case and redirects directly to WhatsApp with the full case details and generated triage report prefilled. The visitor reviews the draft and taps Send.
+The application converts `postgres://` and `postgresql://` URLs to the installed psycopg 3 driver. Make sure the database is active, the database URL is current, and the web service and database can communicate in Render. Never commit a real production connection string.
 
-Keep the real destination number in Render Environment only. Do not place private phone numbers in source files or commit them to Git.
-### Database: critical limitation
+### Submission troubleshooting
 
-SQLite on a Render web service is not durable. Render Free web services have an ephemeral filesystem, and Free Postgres databases expire after 30 days. A free service also spins down after 15 minutes idle and takes about a minute to wake. Therefore **a permanently available site with permanent case storage cannot be guaranteed on Render Free**. Use a paid managed Postgres database (or another durable PostgreSQL provider with backups) before accepting real case records. See `RENDER_FREE_LIMITS.md`.
+After deployment, open `https://YOUR-SERVICE.onrender.com/health/db`:
+
+- `200` with `{"status":"ok","database":"reachable"}` means the application can execute a trivial database query.
+- `503` with `{"status":"error","database":"unavailable"}` means the database is not reachable or is not accepting queries. Check Render's database status, expiration, region, URL, and logs.
+
+When a form submission fails, the page shows a support reference. In Render Logs, search for `intake_failure` and that support reference. The `stage` field identifies whether it failed during the duplicate lookup, database flush, WhatsApp message creation, or database commit. These logs intentionally omit the submitted case contents.
+
+If there is no matching application log, inspect the Render service/deploy logs and confirm the newest commit is deployed. A Render Free web service may be asleep or starting; see `RENDER_FREE_LIMITS.md`.
+
+## Render persistence and availability limits
+
+Render Free web services sleep after 15 minutes without inbound traffic, and the next request can take about a minute to wake. Their local filesystem is ephemeral, so SQLite data is not durable. Render Free PostgreSQL expires after 30 days and has no backups. Do not use this setup for permanent customer case storage. Use an active managed PostgreSQL database with backups and a paid always-on web service before collecting real reports. See `RENDER_FREE_LIMITS.md`.
 
 ## Admin
 
-- Login: `/private-inbox/login`
+- Login: `/private-inbox/login` (the legacy `/private-inbox/logina` route remains supported).
 - Dashboard: `/private-inbox`
-- Case detail pages, status updates, and CSV export are protected by the admin session and CSRF protection.
-- Keep the admin path obscure if desired, but it is not an authentication control. Password protection remains mandatory.
-- If you intentionally need a one-time password reset for the existing admin user, set a new `ADMIN_PASSWORD` of at least 16 characters and `RESET_ADMIN_PASSWORD=1`, deploy once, then remove `RESET_ADMIN_PASSWORD` and redeploy. Do not leave this flag enabled.
+- Case details, status changes and CSV export require an authenticated admin session and CSRF protection.
+- An obscure admin URL is not an authentication control.
 
-## Intake behavior
+## Application behavior
 
-- The old hard-coded `5 per hour` form limit is replaced by configurable `30 per hour` by default.
-- A unique case reference is created and the record is committed before WhatsApp is opened. Full-message sharing requires separate consent; the final Send action remains manual in WhatsApp.
-- Risk indicators are advisory and are not fraud determinations.
-- The dashboard, case report, and triage labels are translated in 11 bundled locales, including Arabic RTL and Tunisian Arabic. The four additional admin locales (Portuguese, Turkish, Simplified Chinese, Japanese) use English fallback for untranslated public marketing/intake copy; they are not claimed as complete public-site translations.
+- Default intake limit is 30 submissions per hour per client IP; the general app limit is also applied.
+- Case risk indicators are advisory and are not fraud determinations.
+- The admin dashboard search/filter covers the 250 newest rows loaded on the page; CSV export covers all stored rows.
+- Admin/dashboard translations are bundled for English, French, Arabic, Tunisian Arabic, Spanish, German, Italian, Portuguese, Turkish, Simplified Chinese and Japanese. Untranslated public intake copy in the four additional admin locales may fall back to English.
 
 ## Data and privacy
 
-Collect only what is necessary. Do not ask users for passwords, one-time codes, recovery keys, session cookies, payment credentials, or unnecessary identity documents. Publish a real privacy notice, contact address, lawful basis, retention period, and data-subject request process before collecting real customer data. Restrict CSV exports and store backups securely.
+Collect only information needed to assess the report. Never request passwords, one-time codes, recovery keys, session cookies, payment credentials, or unnecessary identity documents. Publish a privacy notice describing purpose, lawful basis, retention, contact details and data-subject rights before accepting real customer records. Restrict exports and protect backups.
 
-See:
-- `SECURITY_ARCHITECTURE.md`
-- `TECHNICAL_REVIEW.md`
-- `RENDER_FREE_LIMITS.md`
+See `SECURITY_ARCHITECTURE.md`, `TECHNICAL_REVIEW.md`, `UI_UX_REVIEW.md`, and `FINAL_DEPLOYMENT_DIAGNOSTICS.md`.

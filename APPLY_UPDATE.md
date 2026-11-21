@@ -1,36 +1,56 @@
-# Apply YAKUZA v12 — single-button WhatsApp intake
+# Apply the YAKUZA final reliability repair
 
-1. Back up your existing GitHub repository and the production database before replacing files.
-2. Extract the complete ZIP. Its files are at the archive root; do not copy an extra enclosing folder.
-3. Replace the old project source files with all archive contents. Preserve `.git/`, `.env`, database files, `instance/`, customer uploads, and backups. Never commit live secrets or customer records.
-4. In Render → Web Service → Environment, set `WHATSAPP_NUMBER` to the destination in international digits only. Example: `4917642484892` (no `+`, spaces, `00`, or domestic trunk zero). Keep all existing admin/database/secret settings.
-5. Commit and push to the branch connected to your existing Render service. Do not force-push.
-6. After deployment, use a controlled dummy case to test the complete flow.
+This archive contains the complete application at its repository root.
 
-## Exact one-action behavior
+## Before replacing files
 
-- The contact form has one submit button: **Send to WhatsApp**. There is no delivery-method choice, receipt page, second WhatsApp button, or alternate path.
-- The server requires explicit consent to include the submitted personal details in WhatsApp.
-- The server validates the configured WhatsApp destination, flushes the new case, builds the full message, and commits the case. Only after a successful commit does it issue a `303` redirect to `https://wa.me/` with the full message prefilled.
-- If the WhatsApp number is missing/invalid or the database save fails, the transaction is rolled back and no WhatsApp redirect occurs.
-- WhatsApp still requires the visitor to review the draft and press **Send**. An ordinary `wa.me` link cannot press Send or report delivery back to the website.
+1. Back up the entire GitHub repository and export the current production database.
+2. Extract this ZIP to a clean temporary folder.
+3. Open your existing repository working folder.
+4. Replace the old project source and documentation with every file from this archive.
+5. Preserve `.git/`, the local `.env`, any private uploads, database files, `instance/`, and backups. Never overwrite or commit production secrets/data.
+6. Check `git status` and review the full staged diff before committing.
 
-## Render commands
+## Render environment
 
-- Build: `pip install -r requirements.txt`
-- Start: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
-- Root Directory: blank when `app.py` is in repository root.
-- Health Check: `/health`
+Keep the existing stable `SECRET_KEY`, admin credentials, database URL, cookie setting and admin path. Confirm these values are present:
 
-Do not overwrite `SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DATABASE_URL`, `COOKIE_SECURE`, `ADMIN_URL_PREFIX`, or rate-limit settings unless you intentionally need to rotate/configure them. Keep the real WhatsApp number in Render Environment only; do not hardcode it in Git.
+```env
+COOKIE_SECURE=1
+ADMIN_URL_PREFIX=/private-inbox
+WHATSAPP_NUMBER=YOUR_DIGITS_ONLY_INTERNATIONAL_NUMBER
+INTAKE_RATE_LIMIT=30 per hour
+RATELIMIT_STORAGE_URI=memory://
+```
 
-## Deployment checks
+Keep the WhatsApp number you already configured in Render Environment; it is not embedded in source. Use the international country code followed by the subscriber number, digits only. Do not put `+`, `00`, spaces or the domestic trunk prefix after the country code.
 
-1. Open `/contact` and confirm only one primary form submit button is shown.
-2. Confirm the WhatsApp-sharing consent and account-authorization checkboxes are required.
-3. Submit one dummy case; confirm the browser goes directly to the correct WhatsApp chat with the full prefilled case summary.
-4. Confirm the case is visible in the protected admin dashboard even before pressing Send in WhatsApp.
-5. Press Send in WhatsApp and confirm receipt on the destination account.
-6. Test a missing/invalid destination in a staging environment; the app should show a configuration error and create no case.
+`DATABASE_URL` must point to an active PostgreSQL database. An expired or unreachable database cannot save new cases. The local SQLite fallback is for development only and is not durable on Render Free.
 
-A live Render deployment, production database transaction, and device-level WhatsApp send are not verified by this source package.
+## Render service settings
+
+- Root Directory: blank (when `app.py` is in repository root)
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
+- Health Check Path: `/health`
+
+Do not change the deployed service's start command or delete the database. Push to the branch configured for automatic deployment; do not force-push.
+
+## Verify after deployment
+
+1. Open `/health`. It should return `{"status":"ok","service":"yakuza"}`.
+2. Open `/health/db`. It should return HTTP 200 and `database: reachable`. A 503 means the database path must be fixed before intake can work.
+3. Open `/contact`; complete a controlled dummy report and required consent fields.
+4. Click the only button, **Send to WhatsApp**. The case must commit first, then the same browser tab must open the configured WhatsApp draft with the full details.
+5. Confirm the saved case appears in the protected admin dashboard even before the visitor presses Send in WhatsApp.
+6. Press Send in WhatsApp and confirm the message reaches the configured account.
+
+## If submission still fails
+
+The page will show a support reference. In Render Logs search for `intake_failure` and the reference. Read the `stage` and `error_type` fields. No case contents or credentials are written to the log. If there is no matching line, check Render deploy/service logs and confirm this commit is deployed.
+
+The browser allows 120 seconds for a request and uses a signed per-form case reference so retrying after a lost response will not create a duplicate. Startup ensures a unique case-reference index exists even on upgraded databases. If the existing database already has duplicate non-null references, startup stops and logs a migration error instead of weakening idempotency. PostgreSQL connection/pool/lock/statement waits and SQLite lock waits are bounded.
+
+## WhatsApp limitation
+
+A `wa.me` link opens WhatsApp with prefilled message text. It cannot automatically press Send from the visitor's account and cannot notify the website that the visitor sent it. The visitor must press Send inside WhatsApp. The case is saved before the hand-off.
