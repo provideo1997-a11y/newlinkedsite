@@ -568,6 +568,7 @@ class InquiryForm(FlaskForm):
     phone=StringField(validators=[Optional(),Length(max=40)])
     platform=SelectField(choices=[('not-specified','Not specified'),('instagram','Instagram'),('facebook','Facebook'),('tiktok','TikTok'),('google','Google'),('x','X'),('linkedin','LinkedIn'),('other','Other')], validators=[DataRequired()])
     website=StringField(validators=[Optional(),Length(max=0)])
+    authorization=StringField(validators=[DataRequired(),Length(max=3)])
     whatsapp_consent=StringField(validators=[DataRequired(),Length(max=3)])
     submit=SubmitField()
 class LoginForm(FlaskForm):
@@ -661,7 +662,7 @@ def contact():
 
     if form.website.data:
         abort(400)
-    if form.whatsapp_consent.data != 'yes':
+    if form.authorization.data != 'yes' or form.whatsapp_consent.data != 'yes':
         flash(tr('whatsapp_consent_required'), 'error')
         return render_template('contact.html', form=form), 400
 
