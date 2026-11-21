@@ -10,6 +10,7 @@ def test_whatsapp_normalizes_international_prefixes():
     assert normalize_whatsapp_number("0049 171 2345678") == "491712345678"
     assert normalize_whatsapp_number("+49 (171) 234-5678") == "491712345678"
     assert normalize_whatsapp_number("491712345678") == "491712345678"
+    assert normalize_whatsapp_number("491234567890") == "491234567890"
 
 
 def test_whatsapp_rejects_bad_numbers():

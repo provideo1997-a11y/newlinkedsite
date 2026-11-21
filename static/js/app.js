@@ -94,21 +94,32 @@
 document.addEventListener('DOMContentLoaded',()=>{const field=document.getElementById('case-story');const count=document.getElementById('story-count');if(field&&count){const update=()=>{count.textContent=String(field.value.length);count.style.color=field.value.length>=25?'#c8ff3d':'#96a3a4'};field.addEventListener('input',update);update();}});
 
 
-// Prevent accidental duplicate case submissions and provide a visible submit state.
+// Prevent duplicate submissions, but never leave an unexplained endless spinner.
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('case-intake-form');
   if (!form) return;
+  const submit = form.querySelector('button[type="submit"], input[type="submit"]');
+  const status = document.getElementById('case-submit-status');
+  let slowTimer = null;
   form.addEventListener('submit', () => {
     if (form.dataset.submitting === '1') return;
     form.dataset.submitting = '1';
     form.setAttribute('aria-busy', 'true');
-    const submit = form.querySelector('button[type="submit"], input[type="submit"]');
     if (submit) {
       submit.disabled = true;
       submit.classList.add('is-submitting');
       submit.setAttribute('aria-label', submit.dataset.submittingLabel || 'Submitting request');
     }
+    // A slow database/cold-start should produce a useful explanation, not an
+    // apparently permanent spinner. Keep the button disabled to avoid duplicate cases.
+    slowTimer = window.setTimeout(() => {
+      if (form.dataset.submitting === '1' && status) {
+        status.textContent = form.dataset.slowMessage || 'This is taking longer than expected. Keep this page open; do not submit again yet.';
+        if (submit) submit.classList.remove('is-submitting');
+      }
+    }, 15000);
   });
+  window.addEventListener('pagehide', () => { if (slowTimer) window.clearTimeout(slowTimer); }, { once: true });
 });
 
 
@@ -188,4 +199,17 @@ document.addEventListener('DOMContentLoaded', () => {
       submit.classList.remove('is-submitting');
     }
   });
+});
+
+// Open WhatsApp only after the server confirms that the case was committed.
+document.addEventListener('DOMContentLoaded', () => {
+  const handoff = document.getElementById('whatsapp-handoff');
+  if (!handoff) return;
+  const target = handoff.dataset.whatsappUrl;
+  if (!target || !target.startsWith('https://wa.me/')) return;
+  const fallback = document.getElementById('whatsapp-open-link');
+  if (fallback) fallback.addEventListener('click', () => { handoff.dataset.manualOpen = '1'; });
+  window.setTimeout(() => {
+    if (handoff.isConnected && handoff.dataset.manualOpen !== '1') window.location.assign(target);
+  }, 700);
 });

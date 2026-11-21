@@ -21,5 +21,5 @@ git status --short
 printf '\nType COMMIT to create and push this change: '
 read -r answer
 [[ "$answer" == "COMMIT" ]] || { echo "Cancelled; staged changes were left for review."; exit 1; }
-git commit -m "Refresh YAKUZA UI, accessibility and case workflows"
+git commit -m "Fix YAKUZA WhatsApp intake and full case hand-off"
 git push origin HEAD

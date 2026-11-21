@@ -14,7 +14,7 @@ git diff --cached --stat
 git status --short
 $answer = Read-Host 'Type COMMIT to create and push this change'
 if ($answer -cne 'COMMIT') { throw 'Cancelled; staged changes were left for review.' }
-git commit -m "Refresh YAKUZA UI, accessibility and case workflows"
+git commit -m "Fix YAKUZA WhatsApp intake and full case hand-off"
 if ($LASTEXITCODE -ne 0) { throw 'Commit failed. Review staged changes.' }
 git push origin HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Push failed. Check your current branch upstream and GitHub authentication.' }

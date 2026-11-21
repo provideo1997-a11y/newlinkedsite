@@ -16,6 +16,14 @@ python app.py
 For production, set environment variables in Render. Do not commit `.env`, credentials, customer data, SQLite databases, or backups.
 
 
+## WhatsApp and case-intake hand-off (v10)
+
+When a visitor chooses WhatsApp, the server validates the separate WhatsApp-sharing consent, creates the case in the configured database, commits it, and only then renders the receipt page that opens the configured WhatsApp chat. The prefilled message includes the saved case reference, requester contact details, selected platform/category/priority, account handle, incident date, evidence URL, full user-submitted description, risk indicators, and generated triage report. The receipt page retains a manual WhatsApp link if automatic navigation is blocked.
+
+**The visitor must still review the draft and press Send in WhatsApp.** A normal `wa.me` click-to-chat link cannot send messages automatically or tell the website whether the visitor completed the send. No WhatsApp Cloud API token or webhook is assumed.
+
+Because the requested full message includes personal information, the page requires an explicit separate consent for WhatsApp sharing. The WhatsApp URL contains the message text, so it is exposed to the WhatsApp service and may remain in browser history. Do not include passwords, one-time codes, recovery keys, payment data, or unnecessary identity documents. If database persistence fails, the app does not open WhatsApp and displays a save error instead.
+
 ## UI release (v9)
 
 This release keeps the existing Flask/Jinja, CSS and vanilla JavaScript stack and adds:
@@ -50,14 +58,13 @@ Required environment variables:
 ### WhatsApp setup
 
 In Render → your Web Service → Environment:
-1. Add `WHATSAPP_NUMBER`.
-2. For a German number enter `0049` followed by the national number **without the domestic trunk zero**. Example format only: `0049XXXXXXXXXXX`.
+1. Add the key `WHATSAPP_NUMBER`.
+2. Set its value to the full German international number in digits only: country code `49` followed by the subscriber number, without `+`, spaces, `00`, or the domestic trunk zero.
 3. Save changes and redeploy.
-4. Submit a test case using the WhatsApp option. The case is committed to the database before the browser is redirected.
-5. The prepared message contains only the case reference, not the person's name, email, or complaint narrative.
+4. Submit a controlled test case, select WhatsApp, and tick the separate WhatsApp data-sharing consent.
+5. The case is committed first. The receipt page then opens WhatsApp with the full case details and generated triage report; the visitor reviews and taps Send. A manual fallback link remains visible on the receipt page.
 
-If WhatsApp is not configured, the case is still saved and the receipt page explains that WhatsApp hand-off is unavailable.
-
+Keep the real destination number in Render Environment only. Do not place private phone numbers in source files or commit them to Git.
 ### Database: critical limitation
 
 SQLite on a Render web service is not durable. Render Free web services have an ephemeral filesystem, and Free Postgres databases expire after 30 days. A free service also spins down after 15 minutes idle and takes about a minute to wake. Therefore **a permanently available site with permanent case storage cannot be guaranteed on Render Free**. Use a paid managed Postgres database (or another durable PostgreSQL provider with backups) before accepting real case records. See `RENDER_FREE_LIMITS.md`.
@@ -73,7 +80,7 @@ SQLite on a Render web service is not durable. Render Free web services have an 
 ## Intake behavior
 
 - The old hard-coded `5 per hour` form limit is replaced by configurable `30 per hour` by default.
-- A unique case reference is created and the record is committed before the WhatsApp redirect.
+- A unique case reference is created and the record is committed before WhatsApp is opened. Full-message sharing requires separate consent; the final Send action remains manual in WhatsApp.
 - Risk indicators are advisory and are not fraud determinations.
 - The dashboard, case report, receipt, and triage labels are translated in 11 bundled locales, including Arabic RTL and Tunisian Arabic. The four additional admin locales (Portuguese, Turkish, Simplified Chinese, Japanese) use English fallback for untranslated public marketing/intake copy; they are not claimed as complete public-site translations.
 

@@ -24,6 +24,9 @@ def test_every_locale_has_all_new_ui_labels():
         "dashboard_showing", "cases_table_label", "dashboard_recent_limit",
         "copy_reference", "reference_copied", "copy_failed", "print_report",
         "invalid_credentials", "case_status_updated", "submitting_request",
+        "whatsapp_consent_label", "whatsapp_consent_required", "whatsapp_handoff_title",
+        "whatsapp_handoff_body", "whatsapp_open_button", "whatsapp_waiting",
+        "case_save_failed", "submission_slow",
     }
     for locale, labels in ui_copy.items():
         assert set(labels) == required, f"{locale} has a different UI translation catalog"

@@ -2,7 +2,6 @@
 
 - Raised the public case intake limit from 5/hour to a configurable 30/hour default.
 - Fixed German WhatsApp international-number normalization for `0049...` and `+49...`; rejects malformed values and the domestic trunk zero after +49.
-- Reduced WhatsApp URL exposure to the case reference only; no name, email, or incident narrative is placed in the link.
 - Preserved the visitor's chosen language through successful admin login.
 - Added localized admin dashboard, case report, receipt, and risk-triage copy for all 11 bundled locales.
 - Added accurate all-record dashboard metrics while retaining the latest-250 list view.
@@ -33,3 +32,15 @@
 - Restored native browser validation, exposed the story counter to assistive technology, and used a native date input.
 - Improved contrast for muted placeholders and small interface labels, responsive dashboard controls, and reduced-motion/print behavior.
 - Added source-based UI review and regression tests. No new runtime packages were introduced.
+
+
+## v10 — reliable complete-report WhatsApp hand-off
+
+- Fixed the previous reference-only WhatsApp message: the prefilled draft now includes the saved case reference, all submitted requester and incident fields, the full description, advisory risk indicators, and generated triage report.
+- Added a separate explicit consent before sending personal case details to WhatsApp.
+- The case is committed to the database before WhatsApp is opened. Database failures roll back, display an error, and never start the WhatsApp hand-off.
+- Replaced the bare external redirect with a no-store receipt page that confirms persistence, automatically opens `wa.me`, and provides a manual fallback button.
+- Applied `Referrer-Policy: no-referrer` to the case receipt to avoid leaking its page context to WhatsApp; application code does not log the message URL.
+- Added a slow-submission status message so users do not see an unexplained endless submit spinner; the button remains disabled while a pending request could still commit.
+- Added regression tests for the configured international destination, full message payload, URL encoding, explicit consent and commit-before-handoff ordering.
+- Clarified that a normal WhatsApp click-to-chat draft still requires the visitor to press Send; the website cannot observe that final action without an independently configured WhatsApp Business Cloud API/webhook integration.

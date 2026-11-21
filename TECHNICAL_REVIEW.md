@@ -9,7 +9,7 @@
 - Configurable intake rate limit; default raised from 5/hour to 30/hour.
 - CSRF, server-side validation, honeypot, arithmetic challenge, request-size limit, secure cookie options, security headers, and admin session checks.
 - WhatsApp number normalization for `0049...`, `+49...`, and digits-only international formats.
-- WhatsApp prefilled message minimizes personal data and includes only the case reference.
+- WhatsApp prefilled message includes the complete case submission and generated triage report after explicit consent; the message text is visible in the click-to-chat URL.
 - CSV formula-injection neutralization.
 - Accurate dashboard totals beyond the latest 250 displayed records.
 - PostgreSQL URL normalization to the installed psycopg 3 driver, and Render deployment configuration.

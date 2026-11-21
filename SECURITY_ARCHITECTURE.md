@@ -21,16 +21,23 @@ Flask application
 PostgreSQL (recommended) or local SQLite (development only)
 
 WhatsApp branch:
-case transaction committed -> normalized phone -> wa.me redirect
-                                 |
-                                 +--> user reviews and sends manually
+separate sharing consent -> case transaction committed -> complete message built
+                                                        |
+                                                        v
+                                              no-store receipt page
+                                                        |
+                                                        v
+                                                    wa.me link
+                                                        |
+                                                        v
+                                          visitor reviews and presses Send
 ```
 
 Trust boundaries:
 - Public input is hostile, even after browser validation.
 - `X-Forwarded-*` is trusted only for the single Render proxy hop; do not place this service behind additional proxies without recalibrating ProxyFix.
 - The database is a separate trust boundary. Credentials belong only in Render environment variables.
-- WhatsApp is an external service. A redirect is not message delivery, and replies are not synchronized into the case system.
+- WhatsApp is an external service. The prefilled draft is not message delivery; the visitor must press Send. WhatsApp replies are not synchronized into the case system.
 - Admin sessions are privileged. The hidden URL prefix is not an access-control mechanism.
 
 ## 2. Attacker-first threat register
@@ -46,7 +53,7 @@ Likelihood is qualitative for an internet-facing small intake service. Impact me
 | Stored XSS via complaint/name/evidence | Tampering / Information Disclosure; A03 | Medium | High | Jinja autoescaping; no raw HTML rendering; CSP; evidence link uses `noopener noreferrer` | future template filters or `safe` markup could reintroduce XSS |
 | SQL injection through form/search | Tampering; A03 | Low | High | SQLAlchemy ORM and bound query parameters | keep raw SQL restricted to fixed migration statements; never interpolate user input |
 | CSV formula injection by exported user fields | Tampering / Execution; A03 | Medium | High | CSV cells beginning with formula operators are prefixed before export | users still control exported content; treat exports as sensitive and open only in trusted tools |
-| WhatsApp number malformed or PII leaks in URL | Information Disclosure / Tampering | Medium | Medium | normalize `00`, `+`, separators; validate international length; message contains case reference only | WhatsApp hand-off is external; user must review message and manually send |
+| WhatsApp number malformed or full case data exposed in click-to-chat URL | Information Disclosure / Tampering | Medium | High | normalize `00`, `+`, separators; validate international length; separate explicit data-sharing consent; receipt response uses `no-referrer`; application never logs the message URL | Full message text is intentionally sent to the WhatsApp service and may remain in browser history; minimize data, obtain consent, and never include credentials or authentication secrets |
 | TOCTOU / duplicate submissions | Tampering / DoS | Medium | Medium | server-side unique case reference; 48-bit reference suffix; database uniqueness; disable repeat-click in UI | database uniqueness conflict is not retried; add retry/backoff if volume grows |
 | Case data lost on restart/redeploy | Availability / Tampering | High on Free SQLite | Critical | PostgreSQL supported; deployment guide prohibits SQLite in production | Render Free Postgres expires after 30 days and has no backups; paid durable DB required |
 | Malicious evidence URL / phishing | Information Disclosure / Social Engineering | Medium | Medium | HTTPS-only URL validation; no server-side fetch; new tab with `noopener` | URL is not verified as safe or authentic; staff must not download/run content blindly |
@@ -60,7 +67,7 @@ Likelihood is qualitative for an internet-facing small intake service. Impact me
 1. **Durability is a hosting property, not a Flask setting.** A correct SQLAlchemy model cannot make Render's ephemeral filesystem durable. SQLite on a free web service can silently lose case records on spin-down/redeploy. The only sound fix is an independently durable database with backups.
 2. **Rate limiting is stateful infrastructure.** `memory://` is process-local. Restarting the process resets counters; multiple instances do not share limits. It is a useful friction control, not a robust DDoS defense.
 3. **A hidden admin URL is not authentication.** Discovery by crawling, logs, browser history, or referrers is plausible. Password authentication remains mandatory; MFA is the next material upgrade.
-4. **WhatsApp links are browser-visible.** Query-string content can appear in history, logs, analytics, screenshots, and referrers. The message therefore contains only a case reference, not names, emails, or complaint narratives.
+4. **WhatsApp click-to-chat URLs are browser-visible.** To meet the complete-report workflow, the URL contains the submitted contact details, incident description, and generated triage report after a separate explicit consent. It is sent to WhatsApp and may remain in browser history. The receipt response uses `Referrer-Policy: no-referrer`; application code must never log the full URL or query. Never include passwords, one-time codes, recovery keys, payment details, or identity documents.
 5. **Heuristic scoring is epistemically weak.** Keyword matches can be quoted, negated, translated, or maliciously planted. The score must only prioritize human review and must never label a person as a scammer.
 6. **A single admin role creates a large blast radius.** Anyone who compromises that account can view all records and export them. Add MFA, least-privilege roles, action audit logs, and export alerts before a team rollout.
 
@@ -133,9 +140,9 @@ Run after each deployment:
 1. `/health` returns 200.
 2. Public intake rejects missing CSRF, invalid arithmetic answer, missing authorization, invalid email, invalid evidence URL, and honeypot completion.
 3. A valid dummy report creates one case with one unique reference.
-4. The database commit succeeds before WhatsApp redirect.
+4. The database commit succeeds before the receipt page opens WhatsApp. The WhatsApp draft includes all case details and triage report only after separate consent; visitor presses Send manually.
 5. `0049...`, `+49...`, and `49...` produce the same `wa.me` number; malformed numbers do not redirect.
-6. WhatsApp query contains only case reference and generic text.
+6. WhatsApp draft is generated only after the database commit, requires explicit sharing consent, and contains the case reference, submitted fields, full description, and triage report. The visitor must press Send manually.
 7. Anonymous requests to every admin route are redirected to login.
 8. Admin language selection persists after login, and RTL is applied for Arabic.
 9. Status updates require POST + CSRF and persist after refresh.

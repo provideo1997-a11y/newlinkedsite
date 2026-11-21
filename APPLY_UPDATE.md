@@ -1,4 +1,4 @@
-# Apply YAKUZA v9 to the existing GitHub repository
+# Apply YAKUZA v10 to the existing GitHub repository
 
 This archive is a full project-root replacement. It contains `app.py`, `requirements.txt`, `render.yaml`, templates, static assets, tests and documentation at the ZIP root.
 
@@ -41,9 +41,9 @@ Do not create a second Render service from `render.yaml`. Preserve the existing 
 3. Check that the admin login, dashboard search/status filters, case report, status update and CSV export work. The dashboard filters only the 250 most recent server-rendered rows; CSV export remains the complete export.
 4. Test copy-reference and print actions in an HTTPS browser.
 5. Test all 11 admin locales, including Arabic RTL and Tunisian Arabic.
-6. Test WhatsApp using a controlled number before enabling customer hand-off.
+6. Test WhatsApp using a controlled number: select the WhatsApp option, tick the separate sharing-consent box, submit, confirm the saved case appears in the dashboard, and confirm the complete prefilled report opens in WhatsApp. Manually press Send only with test data.
 7. Confirm the test case is in the intended durable database before accepting real submissions.
 
 ## Verification boundary
 
-This package was validated with Python compilation, JavaScript syntax checking, pytest, Jinja template parsing/rendering and YAML parsing in the build environment. The build environment could not install Flask dependencies or reach your GitHub/Render project, so a full Flask startup, live database migration, real browser/assistive-technology session, live WhatsApp hand-off and production deployment were not verified here.
+This package was validated with Python compilation, JavaScript syntax checking, pytest, Jinja parsing/receipt rendering and YAML parsing in the build environment. Flask dependencies were not available in the build environment, and the package index was unreachable, so a full Flask startup, live database migration, interactive browser session, WhatsApp application launch/send, and production deployment were not verified here. A `wa.me` link only prefills text; the visitor must press Send in WhatsApp.

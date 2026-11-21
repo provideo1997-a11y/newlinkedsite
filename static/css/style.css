@@ -159,3 +159,12 @@ body{font-size:var(--body-size);line-height:1.75;letter-spacing:.005em}
 /* Strengthen small muted labels and input hints for WCAG contrast on dark surfaces. */
 .field::placeholder { color: #9aa6aa; opacity: 1; }
 .loader-coords, .hero-side, .card-no, .footer-bottom { color: #879198; }
+
+/* Reliable WhatsApp hand-off receipt and user-facing fallback. */
+.whatsapp-consent-line { padding: 14px 15px; border: 1px solid rgba(200,255,61,.28); border-radius: 10px; background: rgba(200,255,61,.035); }
+.whatsapp-handoff { max-width: 720px; margin: 26px auto; padding: 24px; border: 1px solid rgba(200,255,61,.35); border-radius: 14px; background: rgba(200,255,61,.045); }
+.whatsapp-handoff h2 { color: var(--acid); font-size: clamp(19px,3vw,27px); margin-bottom: 12px; }
+.whatsapp-handoff p { color: #c4d0ca; }
+.whatsapp-handoff .button { margin-top: 12px; }
+#case-submit-status:empty { display:none; }
+@media(max-width:560px) { .whatsapp-handoff { padding: 18px 14px; } }

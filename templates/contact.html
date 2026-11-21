@@ -20,7 +20,7 @@
     <div class="channel-note"><b>{{ t('step_next') }}</b><span>01 / {{ t('private_title') }}</span><span>02 / {{ t('whatsapp_title') }}</span><span>03 / {{ t('privacy_note') }}</span></div>
   </aside>
   <div class="form-panel case-form-panel">
-    <form method="post" id="case-intake-form">
+    <form method="post" id="case-intake-form" data-slow-message="{{ t('submission_slow') }}">
       {{ form.hidden_tag() }}
       <div class="honeypot">{{ form.website.label }}{{ form.website() }}</div>
       <div class="form-section-title"><span>01</span><div><b>{{ t('step_identity') }}</b><small>{{ t('required_note') }}</small></div></div>
@@ -44,10 +44,12 @@
         <label class="choice-option"><input type="radio" name="contact_method" value="support" {% if form.contact_method.data != 'whatsapp' %}checked{% endif %}><span><b>{{ t('private_title') }}</b><small>{{ t('private_desc') }}</small></span></label>
         <label class="choice-option"><input type="radio" name="contact_method" value="whatsapp" {% if form.contact_method.data == 'whatsapp' %}checked{% endif %}><span><b>{{ t('whatsapp_title') }}</b><small>{{ t('whatsapp_desc') }}</small></span></label>
       </fieldset>
+      <label class="consent-line whatsapp-consent-line"><input type="checkbox" id="whatsapp-consent" name="whatsapp_consent" value="yes" {% if form.whatsapp_consent.data == 'yes' %}checked{% endif %}> <span>{{ t('whatsapp_consent_label') }}</span></label>
       <div class="human-check"><label for="human_answer"><b>{{ t('human_label') }}:</b> {{ human_question }} = ?</label>{{ form.human_answer(class_='field',placeholder=t('human_hint'),inputmode='numeric',autocomplete='off',required=true) }}{% for e in form.human_answer.errors %}<small class="field-error">{{ e }}</small>{% endfor %}</div>
       <label class="consent-line"><input type="checkbox" name="authorization" value="yes" required> <span>{{ t('consent_text') }}</span></label>
       <p class="form-note">{{ t('privacy_note') }}</p>
       <button class="button button-primary case-submit" type="submit" data-submitting-label="{{ t('submitting_request') }}">{{ t('submit_case') }} <span>↗</span></button>
+      <p class="submit-footnote" id="case-submit-status" role="status" aria-live="polite"></p>
       <p class="submit-footnote">{{ t('secure_note') }}</p>
     </form>
   </div>

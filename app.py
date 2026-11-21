@@ -11,9 +11,9 @@ from wtforms import StringField, EmailField, SelectField, TextAreaField, Passwor
 from wtforms.validators import DataRequired, Email, Length, Optional, Regexp
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
-from urllib.parse import quote
 from sqlalchemy import desc
-from security_utils import normalize_whatsapp_number, normalize_database_url, merge_locale_translations, csv_safe
+from security_utils import normalize_database_url, merge_locale_translations, csv_safe
+from whatsapp_utils import build_case_whatsapp_url
 
 app = Flask(__name__, instance_relative_config=True)
 # Render terminates TLS and forwards one trusted proxy hop. Never trust arbitrary client-supplied chains.
@@ -132,19 +132,389 @@ for _locale, _parts in TRIAGE_COPY.items():
 
 
 # UI accessibility and dashboard interaction copy. Every supported locale has every key.
-UI_COPY = {
-    'en': {'skip_to_content':'Skip to main content','primary_navigation':'Primary navigation','language_label':'Choose language','back_to_top':'Back to top','dashboard_metrics':'Case metrics','dashboard_filter':'Filter cases','dashboard_search_placeholder':'Search reference, requester, email or platform…','dashboard_status_filter':'Filter by status','dashboard_all_statuses':'All statuses','dashboard_no_matches':'No cases match these filters.','dashboard_showing':'Showing __visible__ of __total__ loaded cases','cases_table_label':'Recent case submissions','dashboard_recent_limit':'This view shows the 250 most recent cases. Use CSV export for the full dataset.','copy_reference':'Copy reference','reference_copied':'Case reference copied.','copy_failed':'Copy failed. Select the reference and copy it manually.','print_report':'Print report','invalid_credentials':'Invalid username or password.','case_status_updated':'Case status updated.','submitting_request':'Submitting request…'},
-    'fr': {'skip_to_content':'Aller au contenu principal','primary_navigation':'Navigation principale','language_label':'Choisir la langue','back_to_top':'Retour en haut','dashboard_metrics':'Indicateurs des dossiers','dashboard_filter':'Filtrer les dossiers','dashboard_search_placeholder':'Rechercher référence, demandeur, e-mail ou plateforme…','dashboard_status_filter':'Filtrer par statut','dashboard_all_statuses':'Tous les statuts','dashboard_no_matches':'Aucun dossier ne correspond à ces filtres.','dashboard_showing':'Affichage de __visible__ sur __total__ dossiers chargés','cases_table_label':'Demandes récentes','dashboard_recent_limit':'Cette vue affiche les 250 dossiers les plus récents. Utilisez le CSV pour toutes les données.','copy_reference':'Copier la référence','reference_copied':'Référence copiée.','copy_failed':'Copie impossible. Sélectionnez puis copiez la référence manuellement.','print_report':'Imprimer le rapport','invalid_credentials':'Identifiant ou mot de passe incorrect.','case_status_updated':'Statut du dossier mis à jour.','submitting_request':'Envoi de la demande…'},
-    'ar': {'skip_to_content':'تجاوز إلى المحتوى الرئيسي','primary_navigation':'التنقل الرئيسي','language_label':'اختر اللغة','back_to_top':'العودة إلى الأعلى','dashboard_metrics':'مؤشرات الملفات','dashboard_filter':'تصفية الملفات','dashboard_search_placeholder':'ابحث بالمرجع أو مقدم الطلب أو البريد أو المنصة…','dashboard_status_filter':'التصفية حسب الحالة','dashboard_all_statuses':'كل الحالات','dashboard_no_matches':'لا توجد ملفات تطابق عوامل التصفية.','dashboard_showing':'عرض __visible__ من أصل __total__ ملف محمّل','cases_table_label':'أحدث الطلبات','dashboard_recent_limit':'تعرض هذه الصفحة أحدث 250 ملفاً. استخدم تصدير CSV للحصول على كامل البيانات.','copy_reference':'نسخ المرجع','reference_copied':'تم نسخ مرجع الملف.','copy_failed':'تعذر النسخ. حدّد المرجع وانسخه يدوياً.','print_report':'طباعة التقرير','invalid_credentials':'اسم المستخدم أو كلمة المرور غير صحيحة.','case_status_updated':'تم تحديث حالة الملف.','submitting_request':'جارٍ إرسال الطلب…'},
-    'ar-tn': {'skip_to_content':'تعدّى للمحتوى الرئيسي','primary_navigation':'القائمة الرئيسية','language_label':'اختار اللغة','back_to_top':'ارجع للفوق','dashboard_metrics':'مؤشرات الملفات','dashboard_filter':'صفّي الملفات','dashboard_search_placeholder':'فتّش بالمرجع أو الاسم أو الإيميل أو المنصة…','dashboard_status_filter':'صفّي حسب الحالة','dashboard_all_statuses':'كل الحالات','dashboard_no_matches':'ما فما حتى ملف يطابق التصفية هاذي.','dashboard_showing':'نعرضو __visible__ من __total__ ملف ظاهر','cases_table_label':'أحدث الطلبات','dashboard_recent_limit':'الصفحة تعرض آخر 250 ملف. استعمل تصدير CSV للبيانات الكل.','copy_reference':'انسخ المرجع','reference_copied':'تم نسخ مرجع الملف.','copy_failed':'النسخ ما نجحش. حدّد المرجع وانسخو يدوياً.','print_report':'اطبع التقرير','invalid_credentials':'اسم المستخدم ولا كلمة السر موش صحيحين.','case_status_updated':'تحدّثت حالة الملف.','submitting_request':'قاعدين نبعثو في الطلب…'},
-    'es': {'skip_to_content':'Saltar al contenido principal','primary_navigation':'Navegación principal','language_label':'Elegir idioma','back_to_top':'Volver arriba','dashboard_metrics':'Métricas de casos','dashboard_filter':'Filtrar casos','dashboard_search_placeholder':'Buscar referencia, solicitante, correo o plataforma…','dashboard_status_filter':'Filtrar por estado','dashboard_all_statuses':'Todos los estados','dashboard_no_matches':'Ningún caso coincide con estos filtros.','dashboard_showing':'Mostrando __visible__ de __total__ casos cargados','cases_table_label':'Solicitudes recientes','dashboard_recent_limit':'Esta vista muestra los 250 casos más recientes. Usa la exportación CSV para todos los datos.','copy_reference':'Copiar referencia','reference_copied':'Referencia del caso copiada.','copy_failed':'No se pudo copiar. Selecciona y copia la referencia manualmente.','print_report':'Imprimir informe','invalid_credentials':'Usuario o contraseña incorrectos.','case_status_updated':'Estado del caso actualizado.','submitting_request':'Enviando la solicitud…'},
-    'de': {'skip_to_content':'Zum Hauptinhalt springen','primary_navigation':'Hauptnavigation','language_label':'Sprache auswählen','back_to_top':'Nach oben','dashboard_metrics':'Fallkennzahlen','dashboard_filter':'Fälle filtern','dashboard_search_placeholder':'Referenz, Anfragende, E-Mail oder Plattform suchen…','dashboard_status_filter':'Nach Status filtern','dashboard_all_statuses':'Alle Status','dashboard_no_matches':'Keine Fälle entsprechen diesen Filtern.','dashboard_showing':'__visible__ von __total__ geladenen Fällen angezeigt','cases_table_label':'Neueste Fallanfragen','dashboard_recent_limit':'Diese Ansicht zeigt die 250 neuesten Fälle. Für alle Daten den CSV-Export verwenden.','copy_reference':'Referenz kopieren','reference_copied':'Fallreferenz kopiert.','copy_failed':'Kopieren fehlgeschlagen. Referenz markieren und manuell kopieren.','print_report':'Bericht drucken','invalid_credentials':'Benutzername oder Passwort ungültig.','case_status_updated':'Fallstatus aktualisiert.','submitting_request':'Anfrage wird gesendet…'},
-    'it': {'skip_to_content':'Vai al contenuto principale','primary_navigation':'Navigazione principale','language_label':'Scegli la lingua','back_to_top':'Torna su','dashboard_metrics':'Metriche dei casi','dashboard_filter':'Filtra i casi','dashboard_search_placeholder':'Cerca riferimento, richiedente, e-mail o piattaforma…','dashboard_status_filter':'Filtra per stato','dashboard_all_statuses':'Tutti gli stati','dashboard_no_matches':'Nessun caso corrisponde a questi filtri.','dashboard_showing':'Visualizzati __visible__ di __total__ casi caricati','cases_table_label':'Richieste recenti','dashboard_recent_limit':'Questa vista mostra i 250 casi più recenti. Usa l’esportazione CSV per tutti i dati.','copy_reference':'Copia riferimento','reference_copied':'Riferimento del caso copiato.','copy_failed':'Copia non riuscita. Seleziona e copia il riferimento manualmente.','print_report':'Stampa rapporto','invalid_credentials':'Nome utente o password non validi.','case_status_updated':'Stato del caso aggiornato.','submitting_request':'Invio della richiesta…'},
-    'pt': {'skip_to_content':'Ir para o conteúdo principal','primary_navigation':'Navegação principal','language_label':'Escolher idioma','back_to_top':'Voltar ao topo','dashboard_metrics':'Indicadores dos casos','dashboard_filter':'Filtrar casos','dashboard_search_placeholder':'Pesquisar referência, solicitante, e-mail ou plataforma…','dashboard_status_filter':'Filtrar por estado','dashboard_all_statuses':'Todos os estados','dashboard_no_matches':'Nenhum caso corresponde a estes filtros.','dashboard_showing':'A mostrar __visible__ de __total__ casos carregados','cases_table_label':'Pedidos recentes','dashboard_recent_limit':'Esta vista mostra os 250 casos mais recentes. Use a exportação CSV para todos os dados.','copy_reference':'Copiar referência','reference_copied':'Referência do caso copiada.','copy_failed':'Não foi possível copiar. Selecione e copie a referência manualmente.','print_report':'Imprimir relatório','invalid_credentials':'Nome de utilizador ou palavra-passe inválidos.','case_status_updated':'Estado do caso atualizado.','submitting_request':'A enviar o pedido…'},
-    'tr': {'skip_to_content':'Ana içeriğe geç','primary_navigation':'Ana gezinme','language_label':'Dil seçin','back_to_top':'Başa dön','dashboard_metrics':'Dosya ölçümleri','dashboard_filter':'Dosyaları filtrele','dashboard_search_placeholder':'Referans, başvuran, e-posta veya platform ara…','dashboard_status_filter':'Duruma göre filtrele','dashboard_all_statuses':'Tüm durumlar','dashboard_no_matches':'Bu filtrelerle eşleşen dosya yok.','dashboard_showing':'Yüklenen __total__ dosyanın __visible__ tanesi gösteriliyor','cases_table_label':'Son dosya başvuruları','dashboard_recent_limit':'Bu görünüm en son 250 dosyayı gösterir. Tüm veriler için CSV dışa aktarımını kullanın.','copy_reference':'Referansı kopyala','reference_copied':'Dosya referansı kopyalandı.','copy_failed':'Kopyalama başarısız. Referansı seçip elle kopyalayın.','print_report':'Raporu yazdır','invalid_credentials':'Kullanıcı adı veya parola geçersiz.','case_status_updated':'Dosya durumu güncellendi.','submitting_request':'Talep gönderiliyor…'},
-    'zh': {'skip_to_content':'跳转到主要内容','primary_navigation':'主导航','language_label':'选择语言','back_to_top':'返回顶部','dashboard_metrics':'案件指标','dashboard_filter':'筛选案件','dashboard_search_placeholder':'搜索编号、提交人、邮箱或平台…','dashboard_status_filter':'按状态筛选','dashboard_all_statuses':'所有状态','dashboard_no_matches':'没有符合这些筛选条件的案件。','dashboard_showing':'显示已加载 __total__ 个案件中的 __visible__ 个','cases_table_label':'最近提交的案件','dashboard_recent_limit':'此视图显示最近的 250 个案件。完整数据请使用 CSV 导出。','copy_reference':'复制编号','reference_copied':'案件编号已复制。','copy_failed':'复制失败。请手动选择并复制编号。','print_report':'打印报告','invalid_credentials':'用户名或密码不正确。','case_status_updated':'案件状态已更新。','submitting_request':'正在提交请求…'},
-    'ja': {'skip_to_content':'メインコンテンツへ移動','primary_navigation':'メインナビゲーション','language_label':'言語を選択','back_to_top':'ページ上部へ','dashboard_metrics':'案件指標','dashboard_filter':'案件を絞り込む','dashboard_search_placeholder':'参照番号、申請者、メール、プラットフォームを検索…','dashboard_status_filter':'ステータスで絞り込む','dashboard_all_statuses':'すべてのステータス','dashboard_no_matches':'条件に一致する案件はありません。','dashboard_showing':'読み込み済み __total__ 件中 __visible__ 件を表示','cases_table_label':'最近の案件一覧','dashboard_recent_limit':'この画面には直近250件が表示されます。全データはCSVでエクスポートしてください。','copy_reference':'参照番号をコピー','reference_copied':'案件の参照番号をコピーしました。','copy_failed':'コピーできませんでした。参照番号を選択して手動でコピーしてください。','print_report':'レポートを印刷','invalid_credentials':'ユーザー名またはパスワードが正しくありません。','case_status_updated':'案件のステータスを更新しました。','submitting_request':'リクエストを送信中…'},
-}
+UI_COPY = {'en': {'skip_to_content': 'Skip to main content',
+        'primary_navigation': 'Primary navigation',
+        'language_label': 'Choose language',
+        'back_to_top': 'Back to top',
+        'dashboard_metrics': 'Case metrics',
+        'dashboard_filter': 'Filter cases',
+        'dashboard_search_placeholder': 'Search reference, requester, email or platform…',
+        'dashboard_status_filter': 'Filter by status',
+        'dashboard_all_statuses': 'All statuses',
+        'dashboard_no_matches': 'No cases match these filters.',
+        'dashboard_showing': 'Showing __visible__ of __total__ loaded cases',
+        'cases_table_label': 'Recent case submissions',
+        'dashboard_recent_limit': 'This view shows the 250 most recent cases. Use CSV export for the full '
+                                  'dataset.',
+        'copy_reference': 'Copy reference',
+        'reference_copied': 'Case reference copied.',
+        'copy_failed': 'Copy failed. Select the reference and copy it manually.',
+        'print_report': 'Print report',
+        'invalid_credentials': 'Invalid username or password.',
+        'case_status_updated': 'Case status updated.',
+        'submitting_request': 'Submitting request…',
+        'whatsapp_consent_label': 'I agree that the information I submitted, including my contact details '
+                                  'and incident description, and the generated intake report may be included '
+                                  'in a prefilled WhatsApp message to YAKUZA. WhatsApp is a third-party '
+                                  'service. I will review the draft and press Send myself.',
+        'whatsapp_consent_required': 'Please confirm that you agree to share your submitted case details in '
+                                     'a WhatsApp message.',
+        'whatsapp_handoff_title': 'Your case is saved — WhatsApp is ready',
+        'whatsapp_handoff_body': 'Your case has already been saved in the secure dashboard. WhatsApp will '
+                                 'open with the details you submitted and the generated intake report. '
+                                 'Review the message and press Send to share it with YAKUZA.',
+        'whatsapp_open_button': 'Open WhatsApp message',
+        'whatsapp_waiting': 'Opening WhatsApp… If it does not open, use the button below.',
+        'case_save_failed': 'We could not save your case. Nothing was sent to WhatsApp. Please try again '
+                            'shortly.',
+        'submission_slow': 'This is taking longer than expected. Keep this page open; do not submit the case '
+                           'again yet.'},
+ 'fr': {'skip_to_content': 'Aller au contenu principal',
+        'primary_navigation': 'Navigation principale',
+        'language_label': 'Choisir la langue',
+        'back_to_top': 'Retour en haut',
+        'dashboard_metrics': 'Indicateurs des dossiers',
+        'dashboard_filter': 'Filtrer les dossiers',
+        'dashboard_search_placeholder': 'Rechercher référence, demandeur, e-mail ou plateforme…',
+        'dashboard_status_filter': 'Filtrer par statut',
+        'dashboard_all_statuses': 'Tous les statuts',
+        'dashboard_no_matches': 'Aucun dossier ne correspond à ces filtres.',
+        'dashboard_showing': 'Affichage de __visible__ sur __total__ dossiers chargés',
+        'cases_table_label': 'Demandes récentes',
+        'dashboard_recent_limit': 'Cette vue affiche les 250 dossiers les plus récents. Utilisez le CSV pour '
+                                  'toutes les données.',
+        'copy_reference': 'Copier la référence',
+        'reference_copied': 'Référence copiée.',
+        'copy_failed': 'Copie impossible. Sélectionnez puis copiez la référence manuellement.',
+        'print_report': 'Imprimer le rapport',
+        'invalid_credentials': 'Identifiant ou mot de passe incorrect.',
+        'case_status_updated': 'Statut du dossier mis à jour.',
+        'submitting_request': 'Envoi de la demande…',
+        'whatsapp_consent_label': 'J’accepte que les informations saisies, y compris mes coordonnées et la '
+                                  'description de l’incident, ainsi que le rapport généré, figurent dans un '
+                                  'message WhatsApp prérempli destiné à YAKUZA. WhatsApp est un service '
+                                  'tiers. Je vérifierai le brouillon et appuierai moi-même sur Envoyer.',
+        'whatsapp_consent_required': 'Veuillez confirmer votre accord pour partager les détails du dossier '
+                                     'dans un message WhatsApp.',
+        'whatsapp_handoff_title': 'Votre dossier est enregistré — WhatsApp est prêt',
+        'whatsapp_handoff_body': 'Votre dossier est déjà enregistré dans le tableau de bord sécurisé. '
+                                 'WhatsApp va s’ouvrir avec vos informations et le rapport généré. Vérifiez '
+                                 'le message puis appuyez sur Envoyer.',
+        'whatsapp_open_button': 'Ouvrir le message WhatsApp',
+        'whatsapp_waiting': 'Ouverture de WhatsApp… Si rien ne se passe, utilisez le bouton ci-dessous.',
+        'case_save_failed': 'Impossible d’enregistrer le dossier. Aucun message WhatsApp n’a été envoyé. '
+                            'Réessayez dans un instant.',
+        'submission_slow': 'Le traitement prend plus de temps que prévu. Gardez cette page ouverte et ne '
+                           'renvoyez pas encore le dossier.'},
+ 'ar': {'skip_to_content': 'تجاوز إلى المحتوى الرئيسي',
+        'primary_navigation': 'التنقل الرئيسي',
+        'language_label': 'اختر اللغة',
+        'back_to_top': 'العودة إلى الأعلى',
+        'dashboard_metrics': 'مؤشرات الملفات',
+        'dashboard_filter': 'تصفية الملفات',
+        'dashboard_search_placeholder': 'ابحث بالمرجع أو مقدم الطلب أو البريد أو المنصة…',
+        'dashboard_status_filter': 'التصفية حسب الحالة',
+        'dashboard_all_statuses': 'كل الحالات',
+        'dashboard_no_matches': 'لا توجد ملفات تطابق عوامل التصفية.',
+        'dashboard_showing': 'عرض __visible__ من أصل __total__ ملف محمّل',
+        'cases_table_label': 'أحدث الطلبات',
+        'dashboard_recent_limit': 'تعرض هذه الصفحة أحدث 250 ملفاً. استخدم تصدير CSV للحصول على كامل '
+                                  'البيانات.',
+        'copy_reference': 'نسخ المرجع',
+        'reference_copied': 'تم نسخ مرجع الملف.',
+        'copy_failed': 'تعذر النسخ. حدّد المرجع وانسخه يدوياً.',
+        'print_report': 'طباعة التقرير',
+        'invalid_credentials': 'اسم المستخدم أو كلمة المرور غير صحيحة.',
+        'case_status_updated': 'تم تحديث حالة الملف.',
+        'submitting_request': 'جارٍ إرسال الطلب…',
+        'whatsapp_consent_label': 'أوافق على تضمين المعلومات التي قدمتها، بما فيها بيانات الاتصال ووصف '
+                                  'الحادثة وتقرير الفرز المُنشأ، في رسالة واتساب جاهزة إلى YAKUZA. واتساب '
+                                  'خدمة تابعة لطرف ثالث. سأراجع الرسالة وأضغط على إرسال بنفسي.',
+        'whatsapp_consent_required': 'يرجى تأكيد موافقتك على مشاركة تفاصيل الملف في رسالة واتساب.',
+        'whatsapp_handoff_title': 'تم حفظ ملفك — واتساب جاهز',
+        'whatsapp_handoff_body': 'تم حفظ ملفك بالفعل في لوحة التحكم الآمنة. سيفتح واتساب مع المعلومات التي '
+                                 'قدمتها وتقرير الفرز. راجع الرسالة ثم اضغط على إرسال لمشاركتها مع YAKUZA.',
+        'whatsapp_open_button': 'افتح رسالة واتساب',
+        'whatsapp_waiting': 'جارٍ فتح واتساب… إذا لم يفتح، استخدم الزر أدناه.',
+        'case_save_failed': 'تعذر حفظ ملفك. لم يتم إرسال أي رسالة إلى واتساب. يرجى المحاولة بعد قليل.',
+        'submission_slow': 'يستغرق الطلب وقتاً أطول من المتوقع. اترك الصفحة مفتوحة ولا ترسل الطلب مرة أخرى '
+                           'الآن.'},
+ 'ar-tn': {'skip_to_content': 'تعدّى للمحتوى الرئيسي',
+           'primary_navigation': 'القائمة الرئيسية',
+           'language_label': 'اختار اللغة',
+           'back_to_top': 'ارجع للفوق',
+           'dashboard_metrics': 'مؤشرات الملفات',
+           'dashboard_filter': 'صفّي الملفات',
+           'dashboard_search_placeholder': 'فتّش بالمرجع أو الاسم أو الإيميل أو المنصة…',
+           'dashboard_status_filter': 'صفّي حسب الحالة',
+           'dashboard_all_statuses': 'كل الحالات',
+           'dashboard_no_matches': 'ما فما حتى ملف يطابق التصفية هاذي.',
+           'dashboard_showing': 'نعرضو __visible__ من __total__ ملف ظاهر',
+           'cases_table_label': 'أحدث الطلبات',
+           'dashboard_recent_limit': 'الصفحة تعرض آخر 250 ملف. استعمل تصدير CSV للبيانات الكل.',
+           'copy_reference': 'انسخ المرجع',
+           'reference_copied': 'تم نسخ مرجع الملف.',
+           'copy_failed': 'النسخ ما نجحش. حدّد المرجع وانسخو يدوياً.',
+           'print_report': 'اطبع التقرير',
+           'invalid_credentials': 'اسم المستخدم ولا كلمة السر موش صحيحين.',
+           'case_status_updated': 'تحدّثت حالة الملف.',
+           'submitting_request': 'قاعدين نبعثو في الطلب…',
+           'whatsapp_consent_label': 'نوافق اللي المعلومات اللي دخلتها، بما فيها بيانات الاتصال ووصف المشكلة '
+                                     'والتقرير الآلي، تتحط في رسالة واتساب جاهزة لـ YAKUZA. واتساب خدمة '
+                                     'خارجية. نراجع الرسالة ونضغط على إرسال بنفسي.',
+           'whatsapp_consent_required': 'أكد موافقتك على مشاركة تفاصيل الملف في رسالة واتساب.',
+           'whatsapp_handoff_title': 'ملفك تسجّل — واتساب حاضر',
+           'whatsapp_handoff_body': 'ملفك تسجّل بالفعل في لوحة التحكم المحمية. واتساب باش يتحل وفيه '
+                                    'المعلومات اللي دخلتها والتقرير. راجع الرسالة واضغط إرسال باش توصل لـ '
+                                    'YAKUZA.',
+           'whatsapp_open_button': 'افتح رسالة واتساب',
+           'whatsapp_waiting': 'قاعدين نحلّو واتساب… كان ما تحلّش، استعمل الزر اللي لتحت.',
+           'case_save_failed': 'ما نجّمش نحفظو الملف. ما تبعث حتى شي لواتساب. عاود جرّب بعد شوية.',
+           'submission_slow': 'الطلب طول أكثر من العادة. خلّي الصفحة محلولة وما تعاودش تبعث الملف توّا.'},
+ 'es': {'skip_to_content': 'Saltar al contenido principal',
+        'primary_navigation': 'Navegación principal',
+        'language_label': 'Elegir idioma',
+        'back_to_top': 'Volver arriba',
+        'dashboard_metrics': 'Métricas de casos',
+        'dashboard_filter': 'Filtrar casos',
+        'dashboard_search_placeholder': 'Buscar referencia, solicitante, correo o plataforma…',
+        'dashboard_status_filter': 'Filtrar por estado',
+        'dashboard_all_statuses': 'Todos los estados',
+        'dashboard_no_matches': 'Ningún caso coincide con estos filtros.',
+        'dashboard_showing': 'Mostrando __visible__ de __total__ casos cargados',
+        'cases_table_label': 'Solicitudes recientes',
+        'dashboard_recent_limit': 'Esta vista muestra los 250 casos más recientes. Usa la exportación CSV '
+                                  'para todos los datos.',
+        'copy_reference': 'Copiar referencia',
+        'reference_copied': 'Referencia del caso copiada.',
+        'copy_failed': 'No se pudo copiar. Selecciona y copia la referencia manualmente.',
+        'print_report': 'Imprimir informe',
+        'invalid_credentials': 'Usuario o contraseña incorrectos.',
+        'case_status_updated': 'Estado del caso actualizado.',
+        'submitting_request': 'Enviando la solicitud…',
+        'whatsapp_consent_label': 'Acepto que la información que he enviado, incluidos mis datos de contacto '
+                                  'y la descripción del incidente, y el informe generado se incluyan en un '
+                                  'mensaje de WhatsApp precompletado para YAKUZA. WhatsApp es un servicio de '
+                                  'terceros. Revisaré el borrador y pulsaré Enviar personalmente.',
+        'whatsapp_consent_required': 'Confirma que aceptas compartir los datos del caso en un mensaje de '
+                                     'WhatsApp.',
+        'whatsapp_handoff_title': 'Tu caso está guardado — WhatsApp está listo',
+        'whatsapp_handoff_body': 'Tu caso ya está guardado en el panel seguro. WhatsApp se abrirá con los '
+                                 'datos enviados y el informe generado. Revisa el mensaje y pulsa Enviar '
+                                 'para compartirlo con YAKUZA.',
+        'whatsapp_open_button': 'Abrir mensaje de WhatsApp',
+        'whatsapp_waiting': 'Abriendo WhatsApp… Si no se abre, utiliza el botón de abajo.',
+        'case_save_failed': 'No se pudo guardar el caso. No se envió nada a WhatsApp. Inténtalo de nuevo.',
+        'submission_slow': 'Esto está tardando más de lo esperado. Mantén esta página abierta y no vuelvas a '
+                           'enviar el caso todavía.'},
+ 'de': {'skip_to_content': 'Zum Hauptinhalt springen',
+        'primary_navigation': 'Hauptnavigation',
+        'language_label': 'Sprache auswählen',
+        'back_to_top': 'Nach oben',
+        'dashboard_metrics': 'Fallkennzahlen',
+        'dashboard_filter': 'Fälle filtern',
+        'dashboard_search_placeholder': 'Referenz, Anfragende, E-Mail oder Plattform suchen…',
+        'dashboard_status_filter': 'Nach Status filtern',
+        'dashboard_all_statuses': 'Alle Status',
+        'dashboard_no_matches': 'Keine Fälle entsprechen diesen Filtern.',
+        'dashboard_showing': '__visible__ von __total__ geladenen Fällen angezeigt',
+        'cases_table_label': 'Neueste Fallanfragen',
+        'dashboard_recent_limit': 'Diese Ansicht zeigt die 250 neuesten Fälle. Für alle Daten den CSV-Export '
+                                  'verwenden.',
+        'copy_reference': 'Referenz kopieren',
+        'reference_copied': 'Fallreferenz kopiert.',
+        'copy_failed': 'Kopieren fehlgeschlagen. Referenz markieren und manuell kopieren.',
+        'print_report': 'Bericht drucken',
+        'invalid_credentials': 'Benutzername oder Passwort ungültig.',
+        'case_status_updated': 'Fallstatus aktualisiert.',
+        'submitting_request': 'Anfrage wird gesendet…',
+        'whatsapp_consent_label': 'Ich stimme zu, dass meine Angaben einschließlich Kontaktdaten und '
+                                  'Vorfallsbeschreibung sowie der erstellte Intake-Bericht in eine '
+                                  'vorausgefüllte WhatsApp-Nachricht an YAKUZA aufgenommen werden. WhatsApp '
+                                  'ist ein Drittanbieterdienst. Ich prüfe den Entwurf und drücke selbst auf '
+                                  'Senden.',
+        'whatsapp_consent_required': 'Bitte bestätige, dass du die Falldaten in einer WhatsApp-Nachricht '
+                                     'teilen möchtest.',
+        'whatsapp_handoff_title': 'Dein Fall ist gespeichert — WhatsApp ist bereit',
+        'whatsapp_handoff_body': 'Dein Fall wurde bereits im geschützten Dashboard gespeichert. WhatsApp '
+                                 'öffnet sich mit deinen Angaben und dem erstellten Bericht. Prüfe die '
+                                 'Nachricht und tippe auf Senden.',
+        'whatsapp_open_button': 'WhatsApp-Nachricht öffnen',
+        'whatsapp_waiting': 'WhatsApp wird geöffnet… Falls nichts passiert, nutze die Schaltfläche unten.',
+        'case_save_failed': 'Der Fall konnte nicht gespeichert werden. Es wurde nichts an WhatsApp gesendet. '
+                            'Bitte versuche es erneut.',
+        'submission_slow': 'Dies dauert länger als erwartet. Lass diese Seite geöffnet und sende den Fall '
+                           'vorerst nicht erneut.'},
+ 'it': {'skip_to_content': 'Vai al contenuto principale',
+        'primary_navigation': 'Navigazione principale',
+        'language_label': 'Scegli la lingua',
+        'back_to_top': 'Torna su',
+        'dashboard_metrics': 'Metriche dei casi',
+        'dashboard_filter': 'Filtra i casi',
+        'dashboard_search_placeholder': 'Cerca riferimento, richiedente, e-mail o piattaforma…',
+        'dashboard_status_filter': 'Filtra per stato',
+        'dashboard_all_statuses': 'Tutti gli stati',
+        'dashboard_no_matches': 'Nessun caso corrisponde a questi filtri.',
+        'dashboard_showing': 'Visualizzati __visible__ di __total__ casi caricati',
+        'cases_table_label': 'Richieste recenti',
+        'dashboard_recent_limit': 'Questa vista mostra i 250 casi più recenti. Usa l’esportazione CSV per '
+                                  'tutti i dati.',
+        'copy_reference': 'Copia riferimento',
+        'reference_copied': 'Riferimento del caso copiato.',
+        'copy_failed': 'Copia non riuscita. Seleziona e copia il riferimento manualmente.',
+        'print_report': 'Stampa rapporto',
+        'invalid_credentials': 'Nome utente o password non validi.',
+        'case_status_updated': 'Stato del caso aggiornato.',
+        'submitting_request': 'Invio della richiesta…',
+        'whatsapp_consent_label': 'Acconsento a includere le informazioni inviate, compresi i dati di '
+                                  'contatto e la descrizione dell’incidente, insieme al rapporto generato, '
+                                  'in un messaggio WhatsApp precompilato per YAKUZA. WhatsApp è un servizio '
+                                  'di terze parti. Controllerò il testo e premerò personalmente Invia.',
+        'whatsapp_consent_required': 'Conferma di accettare la condivisione dei dettagli del caso tramite un '
+                                     'messaggio WhatsApp.',
+        'whatsapp_handoff_title': 'Il caso è salvato — WhatsApp è pronto',
+        'whatsapp_handoff_body': 'Il caso è già stato salvato nella dashboard protetta. WhatsApp si aprirà '
+                                 'con i dati inviati e il rapporto generato. Controlla il messaggio e premi '
+                                 'Invia.',
+        'whatsapp_open_button': 'Apri il messaggio WhatsApp',
+        'whatsapp_waiting': 'Apertura di WhatsApp… Se non si apre, usa il pulsante qui sotto.',
+        'case_save_failed': 'Impossibile salvare il caso. Non è stato inviato nulla a WhatsApp. Riprova tra '
+                            'poco.',
+        'submission_slow': 'L’operazione sta richiedendo più tempo del previsto. Lascia aperta questa pagina '
+                           'e non inviare di nuovo il caso per ora.'},
+ 'pt': {'skip_to_content': 'Ir para o conteúdo principal',
+        'primary_navigation': 'Navegação principal',
+        'language_label': 'Escolher idioma',
+        'back_to_top': 'Voltar ao topo',
+        'dashboard_metrics': 'Indicadores dos casos',
+        'dashboard_filter': 'Filtrar casos',
+        'dashboard_search_placeholder': 'Pesquisar referência, solicitante, e-mail ou plataforma…',
+        'dashboard_status_filter': 'Filtrar por estado',
+        'dashboard_all_statuses': 'Todos os estados',
+        'dashboard_no_matches': 'Nenhum caso corresponde a estes filtros.',
+        'dashboard_showing': 'A mostrar __visible__ de __total__ casos carregados',
+        'cases_table_label': 'Pedidos recentes',
+        'dashboard_recent_limit': 'Esta vista mostra os 250 casos mais recentes. Use a exportação CSV para '
+                                  'todos os dados.',
+        'copy_reference': 'Copiar referência',
+        'reference_copied': 'Referência do caso copiada.',
+        'copy_failed': 'Não foi possível copiar. Selecione e copie a referência manualmente.',
+        'print_report': 'Imprimir relatório',
+        'invalid_credentials': 'Nome de utilizador ou palavra-passe inválidos.',
+        'case_status_updated': 'Estado do caso atualizado.',
+        'submitting_request': 'A enviar o pedido…',
+        'whatsapp_consent_label': 'Concordo que as informações enviadas, incluindo os meus contactos e a '
+                                  'descrição do incidente, bem como o relatório gerado, sejam incluídos numa '
+                                  'mensagem WhatsApp pré-preenchida para a YAKUZA. O WhatsApp é um serviço '
+                                  'de terceiros. Vou rever a mensagem e carregar pessoalmente em Enviar.',
+        'whatsapp_consent_required': 'Confirme que concorda em partilhar os detalhes do caso numa mensagem '
+                                     'WhatsApp.',
+        'whatsapp_handoff_title': 'O seu caso foi guardado — WhatsApp pronto',
+        'whatsapp_handoff_body': 'O seu caso já foi guardado no painel protegido. O WhatsApp será aberto com '
+                                 'os dados enviados e o relatório gerado. Reveja a mensagem e carregue em '
+                                 'Enviar.',
+        'whatsapp_open_button': 'Abrir mensagem do WhatsApp',
+        'whatsapp_waiting': 'A abrir o WhatsApp… Se não abrir, use o botão abaixo.',
+        'case_save_failed': 'Não foi possível guardar o caso. Nada foi enviado para o WhatsApp. Tente '
+                            'novamente.',
+        'submission_slow': 'Isto está a demorar mais do que o esperado. Mantenha esta página aberta e não '
+                           'envie o caso novamente ainda.'},
+ 'tr': {'skip_to_content': 'Ana içeriğe geç',
+        'primary_navigation': 'Ana gezinme',
+        'language_label': 'Dil seçin',
+        'back_to_top': 'Başa dön',
+        'dashboard_metrics': 'Dosya ölçümleri',
+        'dashboard_filter': 'Dosyaları filtrele',
+        'dashboard_search_placeholder': 'Referans, başvuran, e-posta veya platform ara…',
+        'dashboard_status_filter': 'Duruma göre filtrele',
+        'dashboard_all_statuses': 'Tüm durumlar',
+        'dashboard_no_matches': 'Bu filtrelerle eşleşen dosya yok.',
+        'dashboard_showing': 'Yüklenen __total__ dosyanın __visible__ tanesi gösteriliyor',
+        'cases_table_label': 'Son dosya başvuruları',
+        'dashboard_recent_limit': 'Bu görünüm en son 250 dosyayı gösterir. Tüm veriler için CSV dışa '
+                                  'aktarımını kullanın.',
+        'copy_reference': 'Referansı kopyala',
+        'reference_copied': 'Dosya referansı kopyalandı.',
+        'copy_failed': 'Kopyalama başarısız. Referansı seçip elle kopyalayın.',
+        'print_report': 'Raporu yazdır',
+        'invalid_credentials': 'Kullanıcı adı veya parola geçersiz.',
+        'case_status_updated': 'Dosya durumu güncellendi.',
+        'submitting_request': 'Talep gönderiliyor…',
+        'whatsapp_consent_label': 'İletişim bilgilerim ve olay açıklamam dâhil gönderdiğim bilgilerin ve '
+                                  'oluşturulan başvuru raporunun YAKUZA’ya gönderilmek üzere önceden '
+                                  'doldurulmuş bir WhatsApp mesajına eklenmesini kabul ediyorum. WhatsApp '
+                                  'üçüncü taraf bir hizmettir. Mesajı inceleyip Gönder’e kendim basacağım.',
+        'whatsapp_consent_required': 'Dosya bilgilerinin WhatsApp mesajıyla paylaşılmasına izin verdiğinizi '
+                                     'onaylayın.',
+        'whatsapp_handoff_title': 'Dosyanız kaydedildi — WhatsApp hazır',
+        'whatsapp_handoff_body': 'Dosyanız güvenli panele kaydedildi. WhatsApp, gönderdiğiniz bilgiler ve '
+                                 'oluşturulan raporla açılacak. Mesajı inceleyin ve paylaşmak için Gönder’e '
+                                 'basın.',
+        'whatsapp_open_button': 'WhatsApp mesajını aç',
+        'whatsapp_waiting': 'WhatsApp açılıyor… Açılmazsa aşağıdaki düğmeyi kullanın.',
+        'case_save_failed': 'Dosya kaydedilemedi. WhatsApp’a hiçbir mesaj gönderilmedi. Lütfen tekrar '
+                            'deneyin.',
+        'submission_slow': 'İşlem beklenenden uzun sürüyor. Bu sayfayı açık tutun ve şimdilik dosyayı tekrar '
+                           'göndermeyin.'},
+ 'zh': {'skip_to_content': '跳转到主要内容',
+        'primary_navigation': '主导航',
+        'language_label': '选择语言',
+        'back_to_top': '返回顶部',
+        'dashboard_metrics': '案件指标',
+        'dashboard_filter': '筛选案件',
+        'dashboard_search_placeholder': '搜索编号、提交人、邮箱或平台…',
+        'dashboard_status_filter': '按状态筛选',
+        'dashboard_all_statuses': '所有状态',
+        'dashboard_no_matches': '没有符合这些筛选条件的案件。',
+        'dashboard_showing': '显示已加载 __total__ 个案件中的 __visible__ 个',
+        'cases_table_label': '最近提交的案件',
+        'dashboard_recent_limit': '此视图显示最近的 250 个案件。完整数据请使用 CSV 导出。',
+        'copy_reference': '复制编号',
+        'reference_copied': '案件编号已复制。',
+        'copy_failed': '复制失败。请手动选择并复制编号。',
+        'print_report': '打印报告',
+        'invalid_credentials': '用户名或密码不正确。',
+        'case_status_updated': '案件状态已更新。',
+        'submitting_request': '正在提交请求…',
+        'whatsapp_consent_label': '我同意将我提交的信息（包括联系方式和事件描述）以及生成的受理报告放入发送给 YAKUZA 的预填 WhatsApp 消息中。WhatsApp '
+                                  '是第三方服务。我会自行检查草稿并点击发送。',
+        'whatsapp_consent_required': '请确认您同意通过 WhatsApp 消息分享案件详情。',
+        'whatsapp_handoff_title': '案件已保存 — WhatsApp 已准备就绪',
+        'whatsapp_handoff_body': '您的案件已保存到受保护的管理面板。WhatsApp 将打开并预填您提交的信息和生成的报告。请检查消息并点击发送。',
+        'whatsapp_open_button': '打开 WhatsApp 消息',
+        'whatsapp_waiting': '正在打开 WhatsApp…如果没有打开，请使用下方按钮。',
+        'case_save_failed': '无法保存案件。没有向 WhatsApp 发送任何消息。请稍后重试。',
+        'submission_slow': '处理时间超出预期。请保持此页面打开，暂时不要重复提交案件。'},
+ 'ja': {'skip_to_content': 'メインコンテンツへ移動',
+        'primary_navigation': 'メインナビゲーション',
+        'language_label': '言語を選択',
+        'back_to_top': 'ページ上部へ',
+        'dashboard_metrics': '案件指標',
+        'dashboard_filter': '案件を絞り込む',
+        'dashboard_search_placeholder': '参照番号、申請者、メール、プラットフォームを検索…',
+        'dashboard_status_filter': 'ステータスで絞り込む',
+        'dashboard_all_statuses': 'すべてのステータス',
+        'dashboard_no_matches': '条件に一致する案件はありません。',
+        'dashboard_showing': '読み込み済み __total__ 件中 __visible__ 件を表示',
+        'cases_table_label': '最近の案件一覧',
+        'dashboard_recent_limit': 'この画面には直近250件が表示されます。全データはCSVでエクスポートしてください。',
+        'copy_reference': '参照番号をコピー',
+        'reference_copied': '案件の参照番号をコピーしました。',
+        'copy_failed': 'コピーできませんでした。参照番号を選択して手動でコピーしてください。',
+        'print_report': 'レポートを印刷',
+        'invalid_credentials': 'ユーザー名またはパスワードが正しくありません。',
+        'case_status_updated': '案件のステータスを更新しました。',
+        'submitting_request': 'リクエストを送信中…',
+        'whatsapp_consent_label': '連絡先とインシデントの説明を含む送信情報、および作成された受付レポートを、YAKUZA 宛ての事前入力済み WhatsApp '
+                                  'メッセージに含めることに同意します。WhatsApp は第三者サービスです。内容を確認し、自分で送信ボタンを押します。',
+        'whatsapp_consent_required': '案件の詳細を WhatsApp メッセージで共有することへの同意を確認してください。',
+        'whatsapp_handoff_title': '案件を保存しました — WhatsApp の準備ができました',
+        'whatsapp_handoff_body': '案件は保護された管理画面に保存済みです。送信内容と生成されたレポートを入力した状態で WhatsApp '
+                                 'が開きます。メッセージを確認して送信してください。',
+        'whatsapp_open_button': 'WhatsApp メッセージを開く',
+        'whatsapp_waiting': 'WhatsApp を開いています…開かない場合は下のボタンを使用してください。',
+        'case_save_failed': '案件を保存できませんでした。WhatsApp へのメッセージ送信は行われていません。しばらくしてから再試行してください。',
+        'submission_slow': '処理に通常より時間がかかっています。このページを開いたままにし、まだ案件を再送信しないでください。'}}
 for _locale, _copy in UI_COPY.items():
     LANGS[_locale].update(_copy)
 
@@ -163,6 +533,7 @@ class InquiryForm(FlaskForm):
     platform=SelectField(choices=[('not-specified','Not specified'),('instagram','Instagram'),('facebook','Facebook'),('tiktok','TikTok'),('google','Google'),('x','X'),('linkedin','LinkedIn'),('other','Other')], validators=[DataRequired()])
     contact_method=SelectField(choices=[('support','Contact support'),('whatsapp','Continue on WhatsApp')], validators=[DataRequired()])
     website=StringField(validators=[Optional(),Length(max=0)])
+    whatsapp_consent=StringField(validators=[Optional(),Length(max=3)])
     submit=SubmitField()
 class LoginForm(FlaskForm):
     username=StringField(validators=[DataRequired(),Length(max=80)])
@@ -207,7 +578,7 @@ def security_headers(resp):
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
         resp.headers['Pragma'] = 'no-cache'
         resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
-    resp.headers['X-Content-Type-Options']='nosniff'; resp.headers['X-Frame-Options']='DENY'; resp.headers['Referrer-Policy']='strict-origin-when-cross-origin'; resp.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
+    resp.headers['X-Content-Type-Options']='nosniff'; resp.headers['X-Frame-Options']='DENY'; resp.headers.setdefault('Referrer-Policy','strict-origin-when-cross-origin'); resp.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
     resp.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
     if app.config['SESSION_COOKIE_SECURE']: resp.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
     return resp
@@ -232,6 +603,9 @@ def contact():
             a,b=random.randint(2,9),random.randint(1,9); session['human_a']=a; session['human_b']=b
             return render_template('contact.html',form=form,human_question=f"{a} + {b}")
         if form.authorization.data != 'yes': abort(400)
+        if form.contact_method.data == 'whatsapp' and form.whatsapp_consent.data != 'yes':
+            flash(tr('whatsapp_consent_required'), 'error')
+            return render_template('contact.html', form=form, human_question=human_question)
         if form.evidence_url.data:
             from urllib.parse import urlsplit, urlunsplit
             raw_evidence = form.evidence_url.data.strip()
@@ -253,23 +627,41 @@ def contact():
                 "Recommended checks: confirm account ownership through official platform channels; inspect timestamps and original notifications; preserve unedited evidence; never request passwords, OTPs, recovery keys, or remote access.\n"
                 "Limitations: text heuristics can produce false positives and false negatives. A human reviewer must assess context.")
         ref='YKZ-'+datetime.now(timezone.utc).strftime('%y%m%d')+'-'+uuid.uuid4().hex[:12].upper()
-        details=message+"\n\nPlatform: "+form.platform.data
-        item=Inquiry(case_ref=ref,name=form.name.data.strip(),email=form.email.data.strip().lower(),topic=form.topic.data,message=details,
+        # Preserve the original user-entered narrative exactly; platform is stored
+        # separately and is included as its own field in the case report/message.
+        item=Inquiry(case_ref=ref,name=form.name.data.strip(),email=form.email.data.strip().lower(),topic=form.topic.data,message=message,
             platform=form.platform.data,phone=form.phone.data.strip(),incident_date=form.incident_date.data.strip(),
             account_handle=form.account_handle.data.strip(),evidence_url=form.evidence_url.data.strip(),urgency=form.urgency.data,
             risk_score=score,risk_flags=', '.join(flags),triage_report=report,contact_method=form.contact_method.data)
-        db.session.add(item); db.session.commit(); session.pop('human_a',None); session.pop('human_b',None)
-        if form.contact_method.data=='whatsapp':
-            # wa.me requires E.164 digits without a leading plus or international
-            # dial prefix (00). Accept common env formats: +49..., 0049..., 49...
-            number = normalize_whatsapp_number(os.environ.get('WHATSAPP_NUMBER', ''))
-            # Reject malformed values rather than constructing a broken/external URL.
-            if number:
-                # Keep personal details and incident narratives out of URL query strings,
-                # browser history, referrer headers and WhatsApp previews.
-                text_message = f"Hello, I submitted YAKUZA case {ref}. Please advise on the next step. I will not share passwords or verification codes."
-                return redirect('https://wa.me/' + number + '?text=' + quote(text_message, safe=''))
-        return render_template('submitted.html', item=item, whatsapp_unavailable=(form.contact_method.data == 'whatsapp'))
+        db.session.add(item)
+        try:
+            # Commit the case before attempting any external WhatsApp hand-off.
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception('Case intake could not be committed to the configured database.')
+            flash(tr('case_save_failed'), 'error')
+            return render_template('contact.html', form=form, human_question=human_question), 503
+
+        session.pop('human_a',None); session.pop('human_b',None)
+        whatsapp_url = None
+        whatsapp_unavailable = False
+        if form.contact_method.data == 'whatsapp':
+            whatsapp_url = build_case_whatsapp_url(os.environ.get('WHATSAPP_NUMBER', ''), item)
+            whatsapp_unavailable = whatsapp_url is None
+            if whatsapp_unavailable:
+                app.logger.error('WhatsApp hand-off requested but WHATSAPP_NUMBER is missing or invalid.')
+
+        # Render a durable receipt page first. It confirms database persistence and
+        # contains a manual WhatsApp fallback if automatic navigation is blocked.
+        response = make_response(render_template(
+            'submitted.html', item=item, whatsapp_url=whatsapp_url,
+            whatsapp_unavailable=whatsapp_unavailable,
+        ))
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+        return response
     return render_template('contact.html',form=form,human_question=human_question)
 @app.get('/privacy')
 def privacy(): return render_template('privacy.html')
