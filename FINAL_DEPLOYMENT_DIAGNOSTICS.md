@@ -1,48 +1,26 @@
-# Final deployment and submission diagnostics
+# Final deployment diagnostics
 
-Use this after replacing the application files and deploying the commit connected to the existing Render service.
+## Why a submission could reload the contact page
+The previous client explicitly called `window.location.reload()` when Flask-WTF rejected a CSRF token. This hid the actual CSRF problem behind a page refresh. A stale browser-cached JavaScript file could keep doing the same after a code deployment.
 
-## 1. Confirm the live application is running
+## What this repair changes
+1. The AJAX CSRF handler generates a fresh CSRF token and returns it as JSON.
+2. When the signed per-form case token is still valid, the browser updates its hidden CSRF field and retries the same submission exactly once.
+3. If the per-form token expired too, the server supplies a new case token and arithmetic challenge; the user solves the challenge and uses the same sole button again.
+4. The intake JavaScript no longer reloads the current page automatically.
+5. The asset URL has a new version query key, forcing browsers to fetch the repaired JavaScript.
+6. The form targets the canonical contact endpoint; language query cleanup only redirects GET requests.
 
-Open `/health` on the deployed hostname. A 200 response confirms that the Flask service is responding; it does not prove that the database is available.
+## After deployment
+1. Open the public contact form in a private/incognito window.
+2. Confirm browser DevTools → Network loads `static/js/app.js?v=csrf-refresh-20261121` with HTTP 200.
+3. Submit a dummy case once.
+4. The POST `/contact` should respond with JSON `ok: true`; the browser should then navigate to `https://wa.me/<digits>?text=...`.
+5. If a CSRF response occurs, it should be JSON `code: CSRF_TOKEN_REFRESHED`, followed by one automatic retry; it must not reload the page.
+6. In Render Logs, search for `intake_failure` and inspect only the `stage`, `error_type`, and support reference. Do not publish the full WhatsApp URL or case details.
 
-## 2. Confirm database reachability
-
-Open `/health/db`. The route performs `SELECT 1` and intentionally reveals no database URL or credentials.
-
-- HTTP 200 / `database: reachable`: basic database connectivity works.
-- HTTP 503 / `database: unavailable`: inspect database status, active/expiry state, same-region networking, the current `DATABASE_URL`, and Render logs.
-
-The app needs a working database at startup because it initializes/migrates the case tables. If startup fails before routes are served, inspect the Render deploy logs rather than the browser spinner.
-
-## 3. Read a failed submission reference
-
-When the POST reaches the app but cannot complete, the browser shows a support reference. Search Render Logs for `intake_failure`, then match the reference.
-
-| Logged stage | What it points to |
-|---|---|
-| `idempotency_lookup` | Database connection/query before creating a new case. |
-| `case_prepare` | Application-side case construction. |
-| `database_flush` | Database insert/constraint/flush. |
-| `whatsapp_message_build` | Destination validation or draft construction. |
-| `database_commit` | Final transaction commit. |
-
-Only the support ID, generated case reference, phase, exception type and elapsed time are logged. Form content, name, email, phone, evidence links and WhatsApp text are not logged.
-
-If there is no matching application log, look at Render's service/deploy logs and browser Network panel. It may be a cold start, a platform-level 502/503, stale deployment, or request not reaching Flask.
-
-## 4. One-button transaction behavior
-
-The intake POST uses a signed per-form reference with a one-hour validity. Startup creates a unique database index for case references if an older table does not already enforce it. The migration checks for pre-existing duplicate non-null references and fails clearly if they exist. The server checks for an already committed case with the signed reference before re-validating the arithmetic answer, so a retry after a lost response hands off the existing case instead of inserting a duplicate. The unique index and recovery lookup handle simultaneous duplicate requests.
-
-PostgreSQL connection attempts, pool checkout, lock waits and statements have explicit bounds. SQLite's lock wait is bounded. The browser waits up to 120 seconds and displays progress/error text; after a timeout the same form token is retained for safe retry.
-
-## 5. WhatsApp behavior
-
-The case is committed first. The server then provides a `wa.me` URL containing the case reference, requester contact details, incident metadata, narrative and advisory triage report. The client only permits an HTTPS `wa.me` destination with an 8–15 digit phone path, and navigates the current tab. The background fetch refuses redirects so it cannot accidentally follow an external redirect without changing the visible page.
-
-WhatsApp itself still requires the visitor to press Send. This is not an official Business API integration and cannot confirm delivery.
-
-## 6. Render Free behavior and data durability
-
-Free web services can sleep after 15 minutes idle and take around one minute to wake. Free local filesystems are ephemeral. Free Render Postgres databases expire after 30 days. Keep real customer cases only in a durable database with backups and use an always-on plan before production use.
+## Environment invariants
+- `SECRET_KEY` must be a stable, long random value and must be identical across all running workers/instances. Do not rotate it during a visitor's active form session.
+- Keep `WHATSAPP_NUMBER` as an international digits-only or normalizable number (for example `4917642484892`).
+- Keep HTTPS and `COOKIE_SECURE=1` on Render.
+- The configured database must pass `/health/db` before accepting real cases.

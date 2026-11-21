@@ -19,7 +19,7 @@
     </div>
   </aside>
   <div class="form-panel case-form-panel">
-    <form method="post" id="case-intake-form" data-slow-message="{{ t('submission_slow') }}" data-saving-message="{{ t('intake_saving') }}" data-waiting-message="{{ t('intake_waiting') }}" data-timeout-message="{{ t('intake_timeout') }}" data-network-message="{{ t('intake_network_error') }}" data-saved-message="{{ t('intake_saved') }}" data-invalid-response-message="{{ t('intake_invalid_response') }}">
+    <form method="post" action="{{ url_for('contact') }}" id="case-intake-form" data-slow-message="{{ t('submission_slow') }}" data-saving-message="{{ t('intake_saving') }}" data-waiting-message="{{ t('intake_waiting') }}" data-timeout-message="{{ t('intake_timeout') }}" data-network-message="{{ t('intake_network_error') }}" data-saved-message="{{ t('intake_saved') }}" data-invalid-response-message="{{ t('intake_invalid_response') }}">
       {{ form.hidden_tag() }}
       <div class="honeypot">{{ form.website.label }}{{ form.website() }}</div>
       <div class="form-section-title"><span>01</span><div><b>{{ t('step_identity') }}</b><small>{{ t('required_note') }}</small></div></div>

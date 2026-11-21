@@ -1,22 +1,18 @@
-# Final reliability repair changelog
+# YAKUZA — final submission repair
 
-## Submission and WhatsApp hand-off
+## Submission / CSRF loop repair
+- Removed the explicit browser reload response for AJAX CSRF failures.
+- AJAX CSRF failures now return a freshly generated Flask-WTF token, the existing signed case token when valid, and a retryability flag.
+- Client refreshes hidden tokens and retries once without reloading the page.
+- If the signed case token itself has expired, the client updates the arithmetic challenge and asks the visitor to solve it again using the same single submit button.
+- Removed all `window.location.reload()` calls from the intake interaction.
+- Added a cache-busting query parameter to the main JavaScript asset so browsers fetch the updated submit handler.
+- Set the form action explicitly to the canonical `/contact` endpoint.
+- Language query cleanup now redirects GET requests only, never POST submissions.
 
-- Preserved the single **Send to WhatsApp** action and removed receipt/secondary delivery actions.
-- The browser sends one same-origin request, waits for the server's committed-case JSON response, validates the exact WhatsApp destination host/path, then opens the chat in the same tab.
-- The fetch request now refuses redirects. A server-side 303 cannot be followed invisibly inside a background request and mistaken for a failed JSON response.
-- The non-JavaScript form path still receives a 303 only after a successful commit.
-- The prefilled WhatsApp message includes case metadata, requester details, the original report, risk indicators and triage report.
-
-## Reliability and observability
-
-- Added bounded PostgreSQL connection, pool, statement, and lock waits; bounded SQLite lock wait.
-- Added a signed, time-limited, per-form case reference and duplicate recovery for retries and concurrent submission races.
-- Added a 120-second browser deadline and intermediate accessible waiting feedback; the spinner is removed after 8 seconds if the server is still working.
-- Added `/health/db` to test a simple database query independently of the basic process health endpoint.
-- Added a random support reference and phase-based diagnostic log events. Logs omit report content and contact fields.
-- Improved visible handling of server error status codes and support references.
-
-## Verification boundaries
-
-Thirty-nine source/unit tests, Python compilation, JavaScript syntax, template parsing, YAML parsing and shell syntax checks pass. Full Flask integration, production PostgreSQL, Render and device-level WhatsApp delivery could not be run in this environment. See `BUILD_VERIFICATION.md` and `FINAL_DEPLOYMENT_DIAGNOSTICS.md`.
+## Existing one-button behavior retained
+- One public submit button: **Send to WhatsApp**.
+- Case is validated and committed before WhatsApp hand-off.
+- Full case report is prefilled in the WhatsApp chat.
+- Duplicate-safe signed case references remain in place.
+- WhatsApp still requires the visitor to press Send in the app.

@@ -123,6 +123,35 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus(message);
   };
 
+  const sendRequest = () => fetch(form.action || window.location.pathname, {
+    method: 'POST',
+    body: new FormData(form),
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    // The route must answer JSON for this same-origin POST. If a proxy or
+    // framework returns a redirect, surface it instead of silently following it.
+    redirect: 'error',
+    signal: activeController.signal,
+  });
+  const readPayload = async response => {
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.toLowerCase().includes('application/json')
+      ? await response.json().catch(() => null)
+      : null;
+    return { contentType, payload };
+  };
+  const applyRefreshedTokens = payload => {
+    const csrfField = form.querySelector('input[name=csrf_token]');
+    const caseField = form.querySelector('input[name=case_token]');
+    const question = document.getElementById('human-question');
+    const answer = document.getElementById('human_answer');
+    if (csrfField && payload.csrf_token) csrfField.value = payload.csrf_token;
+    if (caseField && payload.case_token) caseField.value = payload.case_token;
+    if (question && payload.human_question) question.textContent = payload.human_question;
+    if (!payload.retryable && answer) answer.value = '';
+  };
+
   form.addEventListener('submit', async event => {
     event.preventDefault();
     if (form.dataset.submitting === '1') return;
@@ -140,66 +169,55 @@ document.addEventListener('DOMContentLoaded', () => {
     activeTimers.push(window.setTimeout(() => {
       if (form.dataset.submitting === '1') {
         setStatus(form.dataset.waitingMessage || 'The server is still processing your request.');
-        // Stop the decorative spinner while the request is outstanding; the
-        // accessible status text communicates the actual state.
         submit.classList.remove('is-submitting');
       }
     }, 8000));
     activeTimers.push(window.setTimeout(() => {
       if (form.dataset.submitting === '1') setStatus(form.dataset.slowMessage || 'This is taking longer than expected.');
     }, 18000));
-    // Render Free may need about a minute to wake from idle; leave enough time
-    // for that cold start. If it still fails, the same case reference is reused.
-    const timeout = window.setTimeout(() => controller.abort(), 120000);
-    activeTimers.push(timeout);
+    // Render Free cold starts can be slow. The deadline is bounded; it never
+    // forces a reload, and a retry uses the same signed case reference.
+    activeTimers.push(window.setTimeout(() => controller.abort(), 120000));
 
     try {
-      const response = await fetch(form.action || window.location.pathname, {
-        method: 'POST',
-        body: new FormData(form),
-        credentials: 'same-origin',
-        cache: 'no-store',
-        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-        // Never let fetch silently follow a WhatsApp 303 inside the background
-        // request. A successful AJAX response must be JSON; navigation happens
-        // only after this code validates its server-generated wa.me destination.
-        redirect: 'error',
-        signal: controller.signal,
-      });
-      const contentType = response.headers.get('content-type') || '';
-      const payload = contentType.toLowerCase().includes('application/json')
-        ? await response.json().catch(() => null)
-        : null;
-      if (payload && payload.case_token) {
-        const tokenField = form.querySelector('input[name=case_token]');
-        if (tokenField) tokenField.value = payload.case_token;
+      let response = await sendRequest();
+      let parsed = await readPayload(response);
+      let payload = parsed.payload;
+
+      // Recover an expired/mismatched CSRF token without reloading the page.
+      // Only retry once, and only while the same signed case token is valid.
+      if (payload && payload.code === 'CSRF_TOKEN_REFRESHED') {
+        applyRefreshedTokens(payload);
+        if (!payload.retryable) {
+          reset(payload.error || form.dataset.timeoutMessage || 'Your form session expired. Please solve the refreshed check and send again.');
+          return;
+        }
+        setStatus(form.dataset.savingMessage || 'Refreshing the secure session…');
+        response = await sendRequest();
+        parsed = await readPayload(response);
+        payload = parsed.payload;
+        if (payload && payload.code === 'CSRF_TOKEN_REFRESHED') applyRefreshedTokens(payload);
       }
-      if (payload && payload.human_question) {
-        const question = document.getElementById('human-question');
-        const answer = document.getElementById('human_answer');
-        if (question) question.textContent = payload.human_question;
-        if (answer) answer.value = '';
-      }
-      if (payload && payload.reload) {
-        window.location.reload();
-        return;
-      }
+
       if (!response.ok || !payload || payload.ok !== true || typeof payload.redirect_url !== 'string') {
-        let message = payload && payload.error ? payload.error : (!contentType.toLowerCase().includes('application/json')
+        let message = payload && payload.error ? payload.error : (!parsed.contentType.toLowerCase().includes('application/json')
           ? `${form.dataset.invalidResponseMessage || 'Unexpected server response.'} (HTTP ${response.status})`
           : (response.status ? `HTTP ${response.status}: ${form.dataset.invalidResponseMessage || 'Unexpected server response.'}` : (form.dataset.invalidResponseMessage || 'The server returned an unexpected response.')));
         if (payload && payload.support_reference && response.status >= 500) message += ` (Support reference: ${payload.support_reference})`;
         reset(message);
         return;
       }
-      const destination = new URL(payload.redirect_url);
+
+      let destination;
+      try { destination = new URL(payload.redirect_url); }
+      catch (_) { reset(form.dataset.invalidResponseMessage || 'The server returned an invalid WhatsApp destination.'); return; }
       if (destination.protocol !== 'https:' || destination.hostname !== 'wa.me' || !/^\/[0-9]{8,15}$/.test(destination.pathname)) {
         reset(form.dataset.invalidResponseMessage || 'The server returned an unexpected WhatsApp destination.');
         return;
       }
       clearTimers();
       setStatus(form.dataset.savedMessage || 'Case saved. Opening WhatsApp…');
-      // Current-tab navigation is not a popup and keeps the single-click action reliable.
+      // One successful form action: save on the server, then leave this page.
       window.location.assign(destination.href);
     } catch (error) {
       const message = error && error.name === 'AbortError'
@@ -212,8 +230,8 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('pageshow', event => {
     if (activeController) activeController.abort();
     reset('');
-    // Returning from WhatsApp via browser Back gets a fresh signed case token.
-    if (event.persisted) window.location.reload();
+    // Returning from WhatsApp via browser Back resets the control in place.
+    // The signed case token remains idempotent, so a repeated send cannot duplicate it.
   });
 });
 

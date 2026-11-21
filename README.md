@@ -91,3 +91,9 @@ Render Free web services sleep after 15 minutes without inbound traffic, and the
 Collect only information needed to assess the report. Never request passwords, one-time codes, recovery keys, session cookies, payment credentials, or unnecessary identity documents. Publish a privacy notice describing purpose, lawful basis, retention, contact details and data-subject rights before accepting real customer records. Restrict exports and protect backups.
 
 See `SECURITY_ARCHITECTURE.md`, `TECHNICAL_REVIEW.md`, `UI_UX_REVIEW.md`, and `FINAL_DEPLOYMENT_DIAGNOSTICS.md`.
+
+## CSRF recovery and page reload fix
+
+The intake script does not call `window.location.reload()`. When Flask-WTF rejects a stale CSRF token, the server returns a newly signed CSRF token as JSON. The browser updates the hidden field and retries once if the signed case token remains valid. If the case token expired, the new arithmetic challenge is displayed in place for the visitor to solve. The form posts to the canonical contact route and language canonicalization is GET-only. `SECRET_KEY` must remain stable across all workers and running instances.
+
+See `FINAL_DEPLOYMENT_DIAGNOSTICS.md` for a deployment smoke test.
