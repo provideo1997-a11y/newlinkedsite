@@ -38,7 +38,8 @@ def test_case_is_saved_before_redirect_to_signed_second_page():
     route = source[start:end]
     assert 'case_ref = ' in route
     assert 'db.session.add(item)' in route
-    assert route.index('db.session.commit()') < route.index("redirect(url_for('case_ready', token=issue_case_handoff_token(case_ref)), code=303)")
+    assert route.index('handoff_token = issue_case_handoff_token(case_ref)') < route.index('db.session.commit()')
+    assert route.index('db.session.commit()') < route.index("redirect(url_for('case_ready', token=handoff_token), code=303)")
     assert "contact_method='whatsapp'" in route
     assert 'db.session.rollback()' in route
     assert 'fetch(' not in route

@@ -4,7 +4,7 @@ from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
-from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
+from flask_wtf.csrf import CSRFProtect, CSRFError
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from wtforms import StringField, EmailField, SelectField, TextAreaField, PasswordField, SubmitField
@@ -722,14 +722,16 @@ def contact():
             created_at=datetime.now(timezone.utc),
         )
         try:
-            # Check the destination and prepare the complete draft before saving.
+            # Validate the WhatsApp draft and sign the next-page reference
+            # before committing, so only the database commit remains before redirect.
             if not build_case_whatsapp_url(whatsapp_number, item):
                 flash(tr('whatsapp_configuration_error'), 'error')
                 return render_template('contact.html', form=form), 503
+            handoff_token = issue_case_handoff_token(case_ref)
             db.session.add(item)
             db.session.commit()
             app.logger.info('case_intake_saved case_ref=%s', case_ref)
-            return redirect(url_for('case_ready', token=issue_case_handoff_token(case_ref)), code=303)
+            return redirect(url_for('case_ready', token=handoff_token), code=303)
         except IntegrityError:
             db.session.rollback()
             if attempt < 2:

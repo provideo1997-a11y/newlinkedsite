@@ -13,7 +13,8 @@ def _route():
 def test_case_is_committed_before_redirect_to_second_page():
     route = _route()
     assert 'db.session.commit()' in route
-    assert route.index('db.session.commit()') < route.index("redirect(url_for('case_ready', token=issue_case_handoff_token(case_ref)), code=303)")
+    assert route.index('handoff_token = issue_case_handoff_token(case_ref)') < route.index('db.session.commit()')
+    assert route.index('db.session.commit()') < route.index("redirect(url_for('case_ready', token=handoff_token), code=303)")
     assert 'build_case_whatsapp_url(whatsapp_number, item)' in route
     assert "contact_method='whatsapp'" in route
     assert 'db.session.rollback()' in route

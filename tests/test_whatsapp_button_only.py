@@ -27,7 +27,8 @@ def test_success_is_post_redirect_get_to_signed_saved_case_page():
     end = source.index("@app.get('/case/ready/<token>')", start)
     route = source[start:end]
     assert 'db.session.commit()' in route
-    assert "redirect(url_for('case_ready', token=issue_case_handoff_token(case_ref)), code=303)" in route
+    assert 'handoff_token = issue_case_handoff_token(case_ref)' in route
+    assert "redirect(url_for('case_ready', token=handoff_token), code=303)" in route
     assert 'whatsapp_success' not in source
 
 
