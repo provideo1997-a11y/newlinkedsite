@@ -89,3 +89,8 @@ def test_duplicate_case_reference_index_migration(tmp_path):
     else:
         raise AssertionError('Duplicate case reference was not blocked')
     engine.dispose()
+
+def test_csrf_time_limit_uses_integer_seconds_for_itsdangerous():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
+    assert 'WTF_CSRF_TIME_LIMIT=12 * 60 * 60' in source
+    assert 'WTF_CSRF_TIME_LIMIT=timedelta' not in source
