@@ -90,83 +90,14 @@
     }, { passive: true });
   }
 })();
-// Keep the simple server-rendered form, but retain a private per-tab draft so
-// a timeout, expired CSRF token, or accidental refresh never forces retyping.
-const CASE_DRAFT_KEY = 'yakuza.case-draft.v1';
-const CSRF_RETRY_KEY = 'yakuza.case-csrf-retry.v1';
+// Keep the simple HTML form flow; only prevent accidental double-clicks.
 document.addEventListener('DOMContentLoaded', () => {
-  const readyPage = document.getElementById('case-ready-whatsapp');
-  if (readyPage) {
-    try {
-      window.sessionStorage.removeItem(CASE_DRAFT_KEY);
-      window.sessionStorage.removeItem(CSRF_RETRY_KEY);
-    } catch (_error) {}
-  }
-
   const form = document.getElementById('case-create-form');
   if (!form) return;
-
-  const ignoredNames = new Set(['csrf_token', 'website', 'submit']);
-  const fields = Array.from(form.querySelectorAll('[name]'))
-    .filter(field => !ignoredNames.has(field.name) && field.type !== 'password' && field.type !== 'file');
-
-  const saveDraft = () => {
-    const draft = {};
-    fields.forEach(field => {
-      draft[field.name] = field.type === 'checkbox'
-        ? { type: 'checkbox', checked: field.checked }
-        : { type: 'value', value: field.value };
-    });
-    try { window.sessionStorage.setItem(CASE_DRAFT_KEY, JSON.stringify(draft)); } catch (_error) {}
-  };
-
-  try {
-    const saved = JSON.parse(window.sessionStorage.getItem(CASE_DRAFT_KEY) || 'null');
-    if (saved && typeof saved === 'object') {
-      fields.forEach(field => {
-        const entry = saved[field.name];
-        if (!entry || typeof entry !== 'object') return;
-        if (field.type === 'checkbox' && entry.type === 'checkbox') {
-          field.checked = Boolean(entry.checked);
-        } else if (entry.type === 'value' && typeof entry.value === 'string') {
-          field.value = entry.value;
-        }
-      });
-    }
-  } catch (_error) {}
-
-  form.addEventListener('input', saveDraft);
-  form.addEventListener('change', saveDraft);
   form.addEventListener('submit', () => {
-    saveDraft();
     const button = form.querySelector('button[type="submit"]');
     if (button) button.disabled = true;
   }, { once: true });
-
-  // A CSRF rejection happens before the case route runs. The server returns
-  // the same values with a fresh token; retry that original click once only.
-  if (form.dataset.csrfRetry === '1') {
-    let retryNow = false;
-    try {
-      if (window.sessionStorage.getItem(CSRF_RETRY_KEY) !== '1') {
-        window.sessionStorage.setItem(CSRF_RETRY_KEY, '1');
-        retryNow = true;
-      } else {
-        window.sessionStorage.removeItem(CSRF_RETRY_KEY);
-      }
-    } catch (_error) {}
-    if (retryNow) {
-      window.setTimeout(() => {
-        if (typeof form.requestSubmit === 'function') form.requestSubmit();
-        else {
-          const button = form.querySelector('button[type="submit"]');
-          if (button) button.click();
-        }
-      }, 0);
-    }
-  } else {
-    try { window.sessionStorage.removeItem(CSRF_RETRY_KEY); } catch (_error) {}
-  }
 });
 
 // Live character counter for the case description.
