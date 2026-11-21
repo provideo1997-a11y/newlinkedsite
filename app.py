@@ -537,17 +537,17 @@ for _locale_catalog in LANGS.values():
 
 # Server-rendered intake errors; no client-side challenge/retry loop.
 INTAKE_ERROR_COPY = {
-    'en': {'intake_form_error':'Please check the highlighted fields and try again.', 'intake_csrf_error':'Your details are still here. The form is ready. Press Create secure case to continue.'},
-    'fr': {'intake_form_error':'Vérifiez les champs signalés puis réessayez.', 'intake_csrf_error':'Vos informations sont toujours là. Le formulaire est prêt. Cliquez sur Créer le dossier sécurisé pour continuer.'},
-    'ar': {'intake_form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.', 'intake_csrf_error':'بياناتك ما زالت موجودة. النموذج جاهز. اضغط إنشاء الملف الآمن للمتابعة.'},
-    'ar-tn': {'intake_form_error':'راجع الخانات المعلّمة وعاود المحاولة.', 'intake_csrf_error':'معلوماتك مازالت موجودة. الفورم حاضر. اضغط سجّل الملف الآمن باش تكمّل.'},
-    'es': {'intake_form_error':'Revisa los campos señalados y vuelve a intentarlo.', 'intake_csrf_error':'Tus datos siguen aquí. El formulario está listo. Pulsa Crear caso seguro para continuar.'},
-    'de': {'intake_form_error':'Bitte prüfe die markierten Felder und versuche es erneut.', 'intake_csrf_error':'Deine Angaben sind noch da. Das Formular ist bereit. Klicke auf Sicheren Fall erstellen, um fortzufahren.'},
-    'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':'I tuoi dati sono ancora qui. Il modulo è pronto. Premi Crea caso sicuro per continuare.'},
-    'pt': {'intake_form_error':'Verifique os campos assinalados e tente novamente.', 'intake_csrf_error':'Os seus dados continuam aqui. O formulário está pronto. Clique em Criar caso seguro para continuar.'},
-    'tr': {'intake_form_error':'Lütfen işaretli alanları kontrol edip tekrar deneyin.', 'intake_csrf_error':'Bilgileriniz burada duruyor. Form hazır. Devam etmek için Güvenli dosya oluştur düğmesine tıklayın.'},
-    'zh': {'intake_form_error':'请检查标记的字段后重试。', 'intake_csrf_error':'你的资料仍在此处。表单已准备好。点击“创建安全案件”继续。'},
-    'ja': {'intake_form_error':'強調表示された項目を確認して再試行してください。', 'intake_csrf_error':'入力内容は保持されています。フォームの準備ができました。「安全なケースを作成」を押して続行してください。'},
+    'en': {'intake_form_error':'Please check the highlighted fields and try again.', 'intake_csrf_error':'Your details are still here. We refreshed the form security and are continuing your submission.'},
+    'fr': {'intake_form_error':'Vérifiez les champs signalés puis réessayez.', 'intake_csrf_error':'Vos informations sont toujours là. La sécurité du formulaire a été actualisée et votre demande reprend.'},
+    'ar': {'intake_form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.', 'intake_csrf_error':'بياناتك ما زالت موجودة. تم تحديث حماية النموذج وسيتم استكمال طلبك.'},
+    'ar-tn': {'intake_form_error':'راجع الخانات المعلّمة وعاود المحاولة.', 'intake_csrf_error':'معلوماتك مازالت موجودة. حدّثنا حماية الفورم وتوّا نكمّلوا الطلب.'},
+    'es': {'intake_form_error':'Revisa los campos señalados y vuelve a intentarlo.', 'intake_csrf_error':'Tus datos siguen aquí. Hemos actualizado la seguridad del formulario y continuamos con el envío.'},
+    'de': {'intake_form_error':'Bitte prüfe die markierten Felder und versuche es erneut.', 'intake_csrf_error':'Deine Angaben sind noch da. Wir haben den Formularschutz erneuert und setzen deine Übermittlung fort.'},
+    'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':'I tuoi dati sono ancora qui. Abbiamo aggiornato la sicurezza del modulo e continuiamo con l'invio.'},
+    'pt': {'intake_form_error':'Verifique os campos assinalados e tente novamente.', 'intake_csrf_error':'Os seus dados continuam aqui. Atualizámos a segurança do formulário e vamos continuar o envio.'},
+    'tr': {'intake_form_error':'Lütfen işaretli alanları kontrol edip tekrar deneyin.', 'intake_csrf_error':'Bilgileriniz burada. Form güvenliğini yeniledik ve gönderiminize devam ediyoruz.'},
+    'zh': {'intake_form_error':'请检查标记的字段后重试。', 'intake_csrf_error':'你的资料仍在此处。表单安全已刷新，正在继续提交。'},
+    'ja': {'intake_form_error':'強調表示された項目を確認して再試行してください。', 'intake_csrf_error':'入力内容は保持されています。フォームの安全性を更新し、送信を続けています。'},
 }
 for _locale, _copy in INTAKE_ERROR_COPY.items():
     LANGS[_locale].update(_copy)
@@ -784,7 +784,7 @@ def handle_csrf_error(error):
         preserved_form.pop('csrf_token', None)
     form = InquiryForm(formdata=preserved_form)
     flash(tr('intake_csrf_error'), 'info')
-    return render_template('contact.html', form=form), 400
+    return render_template('contact.html', form=form, csrf_retry=True), 400
 
 
 @app.errorhandler(Exception)
