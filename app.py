@@ -545,7 +545,7 @@ INTAKE_ERROR_COPY = {
     'de': {'intake_form_error':'Bitte prüfe die markierten Felder und versuche es erneut.', 'intake_csrf_error':'Deine Angaben sind noch da. Das Formular ist bereit. Klicke auf Sicheren Fall erstellen, um fortzufahren.'},
     'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':'I tuoi dati sono ancora qui. Il modulo è pronto. Premi Crea caso sicuro per continuare.'},
     'pt': {'intake_form_error':'Verifique os campos assinalados e tente novamente.', 'intake_csrf_error':'Os seus dados continuam aqui. O formulário está pronto. Clique em Criar caso seguro para continuar.'},
-    'tr': {'intake_form_error':'Lütfen işaretli alanları kontrol edip tekrar deneyin.', 'intake_csrf_error':'Bilgileriniz burada duruyor. Form hazır. Devam etmek için Güvenli dosya oluştur'a tıklayın.'},
+    'tr': {'intake_form_error':'Lütfen işaretli alanları kontrol edip tekrar deneyin.', 'intake_csrf_error':'Bilgileriniz burada duruyor. Form hazır. Devam etmek için Güvenli dosya oluştur düğmesine tıklayın.'},
     'zh': {'intake_form_error':'请检查标记的字段后重试。', 'intake_csrf_error':'你的资料仍在此处。表单已准备好。点击“创建安全案件”继续。'},
     'ja': {'intake_form_error':'強調表示された項目を確認して再試行してください。', 'intake_csrf_error':'入力内容は保持されています。フォームの準備ができました。「安全なケースを作成」を押して続行してください。'},
 }
