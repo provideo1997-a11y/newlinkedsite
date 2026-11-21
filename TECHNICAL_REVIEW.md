@@ -9,7 +9,7 @@
 - Configurable intake rate limit; default raised from 5/hour to 30/hour.
 - CSRF, server-side validation, honeypot, arithmetic challenge, request-size limit, secure cookie options, security headers, and admin session checks.
 - WhatsApp number normalization for `0049...`, `+49...`, and digits-only international formats.
-- WhatsApp prefilled message includes the complete case submission and generated triage report after explicit consent; the message text is visible in the click-to-chat URL.
+- Single-button WhatsApp submission requires explicit consent, commits the full case first, then returns a 303 redirect to a prefilled message with the complete case and generated triage report; the message text is visible in the click-to-chat URL.
 - CSV formula-injection neutralization.
 - Accurate dashboard totals beyond the latest 250 displayed records.
 - PostgreSQL URL normalization to the installed psycopg 3 driver, and Render deployment configuration.
@@ -31,3 +31,7 @@ Static syntax/structure and ZIP integrity checks should be run before release. A
 The v9 interface work is documented in `UI_UX_REVIEW.md`. The existing dark charcoal/lime visual identity and Flask/Jinja plus vanilla JavaScript architecture were retained. The dashboard now supports client-side search and status filtering over the 250 most recent rendered cases, with the existing CSV route retained for full export. Case reports support reference copying and browser printing.
 
 Accessibility work includes skip navigation, semantic main/nav landmarks, current-page nav state, focus-visible rings, localized screen-reader labels, a progressively-enhanced loader, native form validation, and reduced-motion/print rules. These changes were source- and template-tested. They were not certified by an independent WCAG audit or a live assistive-technology test.
+
+
+## v12 submission path
+The intake form now has one primary action only. On a valid submission, the server validates WhatsApp configuration and data-sharing consent, creates the database record, commits it, and redirects directly to WhatsApp in the same tab. The visitor still presses Send in WhatsApp. There is no receipt page or secondary delivery action.

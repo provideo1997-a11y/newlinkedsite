@@ -64,3 +64,7 @@ No product analytics, error-rate dashboard, user interview notes, session record
 ## Validation boundary
 
 The v9 source is checked with Python compilation, JavaScript syntax validation, pytest, Jinja syntax parsing and representative Jinja rendering, and YAML parsing. The build environment did not have Flask dependencies installed and could not reach the package index; therefore full Flask startup, live database integration, production browser testing, assistive-technology certification, Render deployment, and WhatsApp delivery were not verified in this environment.
+
+
+## v12 form simplification
+The public intake form now has one delivery path and one primary submit action: **Send to WhatsApp**. The radio choice between private inbox and WhatsApp, the intermediate receipt screen, and the second WhatsApp button were removed. A required consent line explains that the personal details and generated report will be shared through WhatsApp. A successful form POST creates and commits the case before the browser is redirected directly to the prefilled message.

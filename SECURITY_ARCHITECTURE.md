@@ -24,7 +24,7 @@ WhatsApp branch:
 separate sharing consent -> case transaction committed -> complete message built
                                                         |
                                                         v
-                                              no-store receipt page
+                                              single 303 redirect to WhatsApp after commit
                                                         |
                                                         v
                                                     wa.me link
@@ -53,7 +53,7 @@ Likelihood is qualitative for an internet-facing small intake service. Impact me
 | Stored XSS via complaint/name/evidence | Tampering / Information Disclosure; A03 | Medium | High | Jinja autoescaping; no raw HTML rendering; CSP; evidence link uses `noopener noreferrer` | future template filters or `safe` markup could reintroduce XSS |
 | SQL injection through form/search | Tampering; A03 | Low | High | SQLAlchemy ORM and bound query parameters | keep raw SQL restricted to fixed migration statements; never interpolate user input |
 | CSV formula injection by exported user fields | Tampering / Execution; A03 | Medium | High | CSV cells beginning with formula operators are prefixed before export | users still control exported content; treat exports as sensitive and open only in trusted tools |
-| WhatsApp number malformed or full case data exposed in click-to-chat URL | Information Disclosure / Tampering | Medium | High | normalize `00`, `+`, separators; validate international length; separate explicit data-sharing consent; receipt response uses `no-referrer`; application never logs the message URL | Full message text is intentionally sent to the WhatsApp service and may remain in browser history; minimize data, obtain consent, and never include credentials or authentication secrets |
+| WhatsApp number malformed or full case data exposed in click-to-chat URL | Information Disclosure / Tampering | Medium | High | normalize `00`, `+`, separators; validate international length; separate explicit data-sharing consent; 303 redirect response uses `no-referrer`; application never logs the message URL | Full message text is intentionally sent to the WhatsApp service and may remain in browser history; minimize data, obtain consent, and never include credentials or authentication secrets |
 | TOCTOU / duplicate submissions | Tampering / DoS | Medium | Medium | server-side unique case reference; 48-bit reference suffix; database uniqueness; disable repeat-click in UI | database uniqueness conflict is not retried; add retry/backoff if volume grows |
 | Case data lost on restart/redeploy | Availability / Tampering | High on Free SQLite | Critical | PostgreSQL supported; deployment guide prohibits SQLite in production | Render Free Postgres expires after 30 days and has no backups; paid durable DB required |
 | Malicious evidence URL / phishing | Information Disclosure / Social Engineering | Medium | Medium | HTTPS-only URL validation; no server-side fetch; new tab with `noopener` | URL is not verified as safe or authentic; staff must not download/run content blindly |
@@ -67,7 +67,7 @@ Likelihood is qualitative for an internet-facing small intake service. Impact me
 1. **Durability is a hosting property, not a Flask setting.** A correct SQLAlchemy model cannot make Render's ephemeral filesystem durable. SQLite on a free web service can silently lose case records on spin-down/redeploy. The only sound fix is an independently durable database with backups.
 2. **Rate limiting is stateful infrastructure.** `memory://` is process-local. Restarting the process resets counters; multiple instances do not share limits. It is a useful friction control, not a robust DDoS defense.
 3. **A hidden admin URL is not authentication.** Discovery by crawling, logs, browser history, or referrers is plausible. Password authentication remains mandatory; MFA is the next material upgrade.
-4. **WhatsApp click-to-chat URLs are browser-visible.** To meet the complete-report workflow, the URL contains the submitted contact details, incident description, and generated triage report after a separate explicit consent. It is sent to WhatsApp and may remain in browser history. The receipt response uses `Referrer-Policy: no-referrer`; application code must never log the full URL or query. Never include passwords, one-time codes, recovery keys, payment details, or identity documents.
+4. **WhatsApp click-to-chat URLs are browser-visible.** To meet the complete-report workflow, the URL contains the submitted contact details, incident description, and generated triage report after a separate explicit consent. It is sent to WhatsApp and may remain in browser history. The redirect response uses `Referrer-Policy: no-referrer`; application code must never log the full URL or query. Never include passwords, one-time codes, recovery keys, payment details, or identity documents.
 5. **Heuristic scoring is epistemically weak.** Keyword matches can be quoted, negated, translated, or maliciously planted. The score must only prioritize human review and must never label a person as a scammer.
 6. **A single admin role creates a large blast radius.** Anyone who compromises that account can view all records and export them. Add MFA, least-privilege roles, action audit logs, and export alerts before a team rollout.
 
@@ -113,7 +113,7 @@ Containment:
 - **Credential incident:** rotate `ADMIN_PASSWORD` and `SECRET_KEY`; revoke active sessions by rotating `SECRET_KEY`; inspect exports and case access.
 - **Spam/DoS:** temporarily disable public POST intake using a maintenance flag, preserve GET/read-only admin access, and increase edge/WAF controls.
 - **Database compromise:** restrict network credentials, take a forensic snapshot, rotate credentials, restore to a clean instance, and notify affected parties as required.
-- **WhatsApp misconfiguration:** disable the WhatsApp choice or remove `WHATSAPP_NUMBER`; intake remains saved and receipt page explains the fallback.
+- **WhatsApp misconfiguration:** reject the submission before commit when `WHATSAPP_NUMBER` is missing or invalid; no case is committed and no external redirect occurs.
 
 ## 6. Engineering trade-offs
 
@@ -140,7 +140,7 @@ Run after each deployment:
 1. `/health` returns 200.
 2. Public intake rejects missing CSRF, invalid arithmetic answer, missing authorization, invalid email, invalid evidence URL, and honeypot completion.
 3. A valid dummy report creates one case with one unique reference.
-4. The database commit succeeds before the receipt page is shown. It displays one explicit WhatsApp button; no script or page-load event opens WhatsApp. The draft includes case details and the triage report only after separate consent; the visitor must click the button and press Send manually.
+4. The visitor activates the form’s sole **Send to WhatsApp** button. The server validates explicit sharing consent and the configured destination, commits the case, then responds with a 303 redirect to the full prefilled WhatsApp message. The visitor must still press Send manually inside WhatsApp.
 5. `0049...`, `+49...`, and `49...` produce the same `wa.me` number; malformed numbers do not redirect.
 6. WhatsApp draft is generated only after the database commit, requires explicit sharing consent, and contains the case reference, submitted fields, full description, and triage report. The visitor must press Send manually.
 7. Anonymous requests to every admin route are redirected to login.
@@ -149,3 +149,7 @@ Run after each deployment:
 10. CSV cells starting with `=`, `+`, `-`, and `@` are neutralized.
 11. Restart/redeploy does not lose records when connected to the intended production database.
 12. A backup is restored into a separate test database successfully.
+
+
+## v12 single-submit hand-off
+The application no longer offers a choice between private inbox and WhatsApp. A valid POST is the one case-creation action; after a successful DB commit, the same browser tab is redirected to the server-generated WhatsApp chat URL. The URL carries the full case summary and triage report and is therefore treated as sensitive; the response is no-store and uses `Referrer-Policy: no-referrer`. The website cannot press Send or confirm delivery using a normal `wa.me` link.

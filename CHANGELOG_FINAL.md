@@ -53,3 +53,14 @@
 - Updated all 11 UI locales to explain that the visitor must click the button and then press Send themselves.
 - Added `noopener noreferrer` and `no-referrer` protections to the external hand-off link.
 - The case is still committed before the receipt is rendered; no WhatsApp launch is attempted when the number is not configured or valid.
+
+
+## v12 — one-button create-and-send-to-WhatsApp flow
+
+- Removed the contact-method radio choice, private-inbox alternative, receipt page, and separate WhatsApp hand-off button.
+- The contact form now exposes exactly one delivery submit action: **Send to WhatsApp**.
+- Every valid submission requires explicit consent for WhatsApp sharing; the database stores `contact_method=whatsapp` for new records.
+- The server checks the configured destination, flushes the record, generates the full prefilled report, commits the transaction, and only then issues a 303 redirect to `wa.me`.
+- A missing/invalid number or database failure rolls back and prevents external redirect; it does not create a case that cannot be handed off.
+- Clarified that the visitor still presses Send inside WhatsApp; a regular click-to-chat URL cannot send automatically or provide delivery confirmation.
+- Added translated single-button labels and configuration-error messages for all 11 supported UI locales.

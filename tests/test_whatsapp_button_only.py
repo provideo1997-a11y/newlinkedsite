@@ -4,57 +4,57 @@ import ast
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_whatsapp_is_opened_only_by_explicit_receipt_link():
-    receipt = (ROOT / 'templates' / 'submitted.html').read_text(encoding='utf-8')
-    script = (ROOT / 'static' / 'js' / 'app.js').read_text(encoding='utf-8')
-    assert receipt.count('id="whatsapp-open-link"') == 1
-    assert 'href="{{ whatsapp_url }}"' in receipt
-    assert 'rel="noopener noreferrer"' in receipt
-    assert 'referrerpolicy="no-referrer"' in receipt
-    assert 'data-whatsapp-url=' not in receipt
-    assert 'window.location.assign(target)' not in script
-    assert 'window.open(target' not in script
-    assert 'whatsapp-handoff' not in script
+def test_contact_form_has_one_whatsapp_submit_and_no_delivery_alternatives():
+    form = (ROOT / "templates" / "contact.html").read_text(encoding="utf-8")
+    assert form.count('type="submit"') == 1
+    assert "t('send_to_whatsapp')" in form
+    assert "contact-choice" not in form
+    assert "contact_method" not in form
+    assert "private_title" not in form
+    assert "whatsapp_title" not in form
+    assert "whatsapp-consent" in form and "required" in form
+    assert "submitted.html" not in form
 
 
-def test_receipt_explicitly_tells_visitor_to_click_and_press_send():
-    receipt = (ROOT / 'templates' / 'submitted.html').read_text(encoding='utf-8')
-    assert "t('whatsapp_waiting')" in receipt
-    assert "t('whatsapp_open_button')" in receipt
-    source = (ROOT / 'app.py').read_text(encoding='utf-8')
-    tree = ast.parse(source)
-    ui_node = next(node.value for node in tree.body
-                   if isinstance(node, ast.Assign)
-                   and any(isinstance(target, ast.Name) and target.id == 'UI_COPY' for target in node.targets))
-    ui_copy = ast.literal_eval(ui_node)
-    assert len(ui_copy) == 11
-    for locale, labels in ui_copy.items():
-        assert 'whatsapp_waiting' in labels and labels['whatsapp_waiting']
-        assert 'whatsapp_handoff_body' in labels and labels['whatsapp_handoff_body']
-        # No locale should tell the visitor WhatsApp is already opening automatically.
-        assert 'will not open until' in labels['whatsapp_handoff_body'].lower() or locale != 'en'
-
-
-def test_whatsapp_destination_stays_server_generated_and_case_is_committed_first():
-    source = (ROOT / 'app.py').read_text(encoding='utf-8')
-    contact_start = source.index('def contact():')
-    route = source[contact_start:source.index("@app.get('/privacy')", contact_start)]
-    assert route.index('db.session.commit()') < route.index('build_case_whatsapp_url(')
-    assert "os.environ.get('WHATSAPP_NUMBER', '')" in route
+def test_successful_submission_redirects_directly_to_whatsapp_after_commit():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    start = source.index("def contact():")
+    end = source.index("@app.get('/privacy')", start)
+    route = source[start:end]
+    assert "db.session.flush()" in route
+    assert route.index("db.session.commit()") < route.index("response = redirect(whatsapp_url, code=303)")
+    assert "build_case_whatsapp_url(configured_whatsapp, item)" in route
+    assert "render_template(\n            'submitted.html'" not in route
+    assert "contact_method='whatsapp'" in route
     assert "response.headers['Referrer-Policy'] = 'no-referrer'" in route
 
 
-def test_intake_contact_method_description_says_button_is_clicked_after_save():
-    source = (ROOT / 'app.py').read_text(encoding='utf-8')
-    tree = ast.parse(source)
-    form_node = next(node.value for node in tree.body
-                     if isinstance(node, ast.Assign)
-                     and any(isinstance(target, ast.Name) and target.id == 'FORM_COPY' for target in node.targets))
-    form_copy = ast.literal_eval(form_node)
-    assert form_copy['en']['whatsapp_desc'] == (
-        'Your case is saved first. After saving, click the WhatsApp button on the receipt '
-        'to open a prepared message you can review and send.'
+def test_no_receipt_template_or_extra_whatsapp_button_remains():
+    assert not (ROOT / "templates" / "submitted.html").exists()
+    assert "whatsapp-open-link" not in "\n".join(
+        p.read_text(encoding="utf-8") for p in (ROOT / "templates").glob("*.html")
     )
-    assert 'cliquez sur le bouton WhatsApp' in form_copy['fr']['whatsapp_desc']
-    assert 'اضغط زر واتساب' in form_copy['ar']['whatsapp_desc']
-    assert 'اضغط على زر واتساب' in form_copy['ar-tn']['whatsapp_desc']
+
+
+def test_all_locales_have_single_button_label_and_configuration_error():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    node = next(n.value for n in tree.body if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "WHATSAPP_INTAKE_COPY" for t in n.targets))
+    labels = ast.literal_eval(node)
+    assert set(labels) == {"en", "fr", "ar", "ar-tn", "es", "de", "it", "pt", "tr", "zh", "ja"}
+    for locale, values in labels.items():
+        assert values["send_to_whatsapp"]
+        assert values["whatsapp_configuration_error"]
+        assert values["secure_note"]
+
+
+def test_server_requires_whatsapp_consent_and_checks_destination_before_commit():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    start = source.index("def contact():")
+    end = source.index("@app.get('/privacy')", start)
+    route = source[start:end]
+    assert "if form.whatsapp_consent.data != 'yes':" in route
+    assert route.index("build_case_whatsapp_url(configured_whatsapp, item)") < route.index("db.session.commit()")
+    assert "db.session.rollback()" in route
+    assert "WHATSAPP_NUMBER" in route

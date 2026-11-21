@@ -16,13 +16,11 @@ python app.py
 For production, set environment variables in Render. Do not commit `.env`, credentials, customer data, SQLite databases, or backups.
 
 
-## WhatsApp and case-intake hand-off (v11)
+## Single-button WhatsApp case intake (v12)
 
-When a visitor chooses WhatsApp, the server validates the separate WhatsApp-sharing consent, creates the case in the configured database, commits it, and only then renders the receipt page with a single visitor-click WhatsApp button. The prefilled message includes the saved case reference, requester contact details, selected platform/category/priority, account handle, incident date, evidence URL, full user-submitted description, risk indicators, and generated triage report. WhatsApp is never opened automatically. The receipt has one explicit button that opens the prepared message only after the visitor clicks it.
+The public intake form has exactly one delivery action: **Send to WhatsApp**. The visitor completes the form, checks the explicit WhatsApp data-sharing consent, and submits once. The server validates the configured destination, creates and commits the case, then responds with a `303` redirect to a prefilled `https://wa.me/` message containing the full case reference, requester and incident details, description, advisory indicators, and generated triage report. There is no contact-method choice, intermediate receipt page, second WhatsApp button, or fallback delivery option.
 
-**The visitor must still review the draft and press Send in WhatsApp.** A normal `wa.me` click-to-chat link cannot send messages automatically or tell the website whether the visitor completed the send. No WhatsApp Cloud API token or webhook is assumed.
-
-Because the requested full message includes personal information, the page requires an explicit separate consent for WhatsApp sharing. The WhatsApp URL contains the message text, so it is exposed to the WhatsApp service and may remain in browser history. Do not include passwords, one-time codes, recovery keys, payment data, or unnecessary identity documents. If database persistence fails, the app does not open WhatsApp and displays a save error instead.
+The visitor must review the draft and press **Send** inside WhatsApp. A standard `wa.me` link cannot send from the visitor's account or notify the website whether the send completed. The message URL contains the submitted personal information and is shared with the WhatsApp service; the form therefore requires explicit consent. If `WHATSAPP_NUMBER` is invalid/missing or the database transaction fails, the transaction is rolled back and the app does not redirect to WhatsApp.
 
 ## UI release (v9)
 
@@ -61,8 +59,8 @@ In Render → your Web Service → Environment:
 1. Add the key `WHATSAPP_NUMBER`.
 2. Set its value to the full German international number in digits only: country code `49` followed by the subscriber number, without `+`, spaces, `00`, or the domestic trunk zero.
 3. Save changes and redeploy.
-4. Submit a controlled test case, select WhatsApp, and tick the separate WhatsApp data-sharing consent.
-5. The case is committed first. The receipt then displays one WhatsApp button. WhatsApp opens only when the visitor clicks that button; the full case details and generated triage report are prefilled. The visitor reviews and taps Send.
+4. Submit one controlled dummy case and tick the required WhatsApp data-sharing consent.
+5. The single form submission saves the case and redirects directly to WhatsApp with the full case details and generated triage report prefilled. The visitor reviews the draft and taps Send.
 
 Keep the real destination number in Render Environment only. Do not place private phone numbers in source files or commit them to Git.
 ### Database: critical limitation
@@ -82,7 +80,7 @@ SQLite on a Render web service is not durable. Render Free web services have an 
 - The old hard-coded `5 per hour` form limit is replaced by configurable `30 per hour` by default.
 - A unique case reference is created and the record is committed before WhatsApp is opened. Full-message sharing requires separate consent; the final Send action remains manual in WhatsApp.
 - Risk indicators are advisory and are not fraud determinations.
-- The dashboard, case report, receipt, and triage labels are translated in 11 bundled locales, including Arabic RTL and Tunisian Arabic. The four additional admin locales (Portuguese, Turkish, Simplified Chinese, Japanese) use English fallback for untranslated public marketing/intake copy; they are not claimed as complete public-site translations.
+- The dashboard, case report, and triage labels are translated in 11 bundled locales, including Arabic RTL and Tunisian Arabic. The four additional admin locales (Portuguese, Turkish, Simplified Chinese, Japanese) use English fallback for untranslated public marketing/intake copy; they are not claimed as complete public-site translations.
 
 ## Data and privacy
 

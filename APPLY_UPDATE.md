@@ -1,28 +1,36 @@
-# Apply YAKUZA v11 — WhatsApp button-only hand-off
+# Apply YAKUZA v12 — single-button WhatsApp intake
 
-1. Back up the current repository and database.
-2. Extract the complete ZIP into a temporary folder.
-3. Replace the application source in the existing repository with the archive contents. Keep `.git/`, the live `.env`, `instance/`, uploaded/private evidence, and database backups.
-4. Do not commit real secrets or local database files.
-5. Keep Render's `WHATSAPP_NUMBER` environment variable set to your destination in international digits-only format. Example shape: `49...`; do not add `+`, spaces, or `00`.
-6. Commit and push the existing deployment branch. Render should redeploy the connected service.
-7. Submit a controlled dummy case, confirm the receipt and database record, then click the WhatsApp button. Verify that the correct chat opens with the complete prefilled message. Review it and press Send manually.
+1. Back up your existing GitHub repository and the production database before replacing files.
+2. Extract the complete ZIP. Its files are at the archive root; do not copy an extra enclosing folder.
+3. Replace the old project source files with all archive contents. Preserve `.git/`, `.env`, database files, `instance/`, customer uploads, and backups. Never commit live secrets or customer records.
+4. In Render → Web Service → Environment, set `WHATSAPP_NUMBER` to the destination in international digits only. Example: `4917642484892` (no `+`, spaces, `00`, or domestic trunk zero). Keep all existing admin/database/secret settings.
+5. Commit and push to the branch connected to your existing Render service. Do not force-push.
+6. After deployment, use a controlled dummy case to test the complete flow.
 
-## Exact hand-off behavior
+## Exact one-action behavior
 
-- The visitor selects WhatsApp and separately consents to share the submitted information.
-- The server validates and commits the case first.
-- The receipt page then shows a single WhatsApp button. The page does not auto-open WhatsApp, use a timer, or redirect on load.
-- Only clicking the button navigates to the WhatsApp click-to-chat URL with the message prefilled.
-- The visitor remains the sender and must press Send in WhatsApp. A website cannot detect or force that final action using an ordinary `wa.me` link.
+- The contact form has one submit button: **Send to WhatsApp**. There is no delivery-method choice, receipt page, second WhatsApp button, or alternate path.
+- The server requires explicit consent to include the submitted personal details in WhatsApp.
+- The server validates the configured WhatsApp destination, flushes the new case, builds the full message, and commits the case. Only after a successful commit does it issue a `303` redirect to `https://wa.me/` with the full message prefilled.
+- If the WhatsApp number is missing/invalid or the database save fails, the transaction is rolled back and no WhatsApp redirect occurs.
+- WhatsApp still requires the visitor to review the draft and press **Send**. An ordinary `wa.me` link cannot press Send or report delivery back to the website.
 
-## Render settings
+## Render commands
 
 - Build: `pip install -r requirements.txt`
 - Start: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
-- Keep `SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `COOKIE_SECURE=1`, `ADMIN_URL_PREFIX=/private-inbox`, `DATABASE_URL`, and rate-limit variables configured as before.
-- `WHATSAPP_NUMBER` must be entered under Render → Web Service → Environment. Do not place the production number or credentials in committed source files.
+- Root Directory: blank when `app.py` is in repository root.
+- Health Check: `/health`
 
-## Deployment verification not performed here
+Do not overwrite `SECRET_KEY`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DATABASE_URL`, `COOKIE_SECURE`, `ADMIN_URL_PREFIX`, or rate-limit settings unless you intentionally need to rotate/configure them. Keep the real WhatsApp number in Render Environment only; do not hardcode it in Git.
 
-The source archive is statically and unit tested. A real Render deployment, production PostgreSQL transaction, device-level WhatsApp app launch, and actual message delivery must still be tested in your deployment environment.
+## Deployment checks
+
+1. Open `/contact` and confirm only one primary form submit button is shown.
+2. Confirm the WhatsApp-sharing consent and account-authorization checkboxes are required.
+3. Submit one dummy case; confirm the browser goes directly to the correct WhatsApp chat with the full prefilled case summary.
+4. Confirm the case is visible in the protected admin dashboard even before pressing Send in WhatsApp.
+5. Press Send in WhatsApp and confirm receipt on the destination account.
+6. Test a missing/invalid destination in a staging environment; the app should show a configuration error and create no case.
+
+A live Render deployment, production database transaction, and device-level WhatsApp send are not verified by this source package.

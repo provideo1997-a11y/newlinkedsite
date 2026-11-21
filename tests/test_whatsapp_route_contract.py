@@ -1,41 +1,37 @@
-import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_whatsapp_requires_separate_data_sharing_consent():
+def test_whatsapp_sharing_consent_is_required_for_every_case():
     source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert "form.contact_method.data == 'whatsapp' and form.whatsapp_consent.data != 'yes'" in source
-    assert "class InquiryForm" in source and "whatsapp_consent=StringField" in source
+    assert "if form.whatsapp_consent.data != 'yes':" in source
+    assert "whatsapp_consent=StringField" in source
 
 
-def test_database_commit_precedes_whatsapp_url_generation():
+def test_case_is_committed_before_external_redirect():
     source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert source.index("db.session.commit()", source.index("def contact")) < source.index(
-        "build_case_whatsapp_url(", source.index("def contact")
-    )
-    assert "db.session.rollback()" in source
-    assert "Case intake could not be committed" in source
+    start = source.index("def contact():")
+    end = source.index("@app.get('/privacy')", start)
+    route = source[start:end]
+    assert route.index("db.session.commit()") < route.index("response = redirect(whatsapp_url, code=303)")
+    assert "db.session.rollback()" in route
+    assert "Case intake could not be committed" in route
 
 
-def test_receipt_has_manual_whatsapp_button_only():
-    receipt = (ROOT / "templates" / "submitted.html").read_text(encoding="utf-8")
-    script = (ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
-    assert 'id="whatsapp-open-link"' in receipt
-    assert 'href="{{ whatsapp_url }}"' in receipt
-    assert 'data-whatsapp-url=' not in receipt
-    assert "window.location.assign(target)" not in script
+def test_whatsapp_url_is_server_generated_and_configuration_checked_before_commit():
+    source = (ROOT / "app.py").read_text(encoding="utf-8")
+    start = source.index("def contact():")
+    end = source.index("@app.get('/privacy')", start)
+    route = source[start:end]
+    assert "os.environ.get('WHATSAPP_NUMBER', '')" in route
+    assert route.index("build_case_whatsapp_url(configured_whatsapp, item)") < route.index("db.session.commit()")
+    assert "response.headers['Referrer-Policy'] = 'no-referrer'" in route
 
 
-def test_whatsapp_data_sharing_consent_is_visible_on_form():
+def test_one_submit_button_is_the_only_contact_delivery_action():
     form = (ROOT / "templates" / "contact.html").read_text(encoding="utf-8")
-    assert 'id="whatsapp-consent"' in form
-    assert "whatsapp_consent_label" in form
-    assert 'data-slow-message=' in form
-
-
-def test_whatsapp_receipt_sets_no_referrer_without_being_overwritten():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert "response.headers['Referrer-Policy'] = 'no-referrer'" in source
-    assert "resp.headers.setdefault('Referrer-Policy','strict-origin-when-cross-origin')" in source
+    assert form.count('type="submit"') == 1
+    assert "contact-choice" not in form
+    assert 'name="contact_method"' not in form
+    assert "t('send_to_whatsapp')" in form
