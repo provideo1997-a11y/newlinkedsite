@@ -1,3 +1,81 @@
-{% extends 'base.html' %}{% block title %}{{ t('admin_title') }} — YAKUZA{% endblock %}{% block content %}<section class="admin-page"><div class="admin-head"><div><span class="section-kicker">{{ t('internal') }}</span><h1>{{ t('admin_title') }}</h1><p class="admin-subtitle">{{ t('admin_subtitle') }}</p></div><div class="admin-actions"><a class="button button-outline" href="{{ url_for('export_inquiries') }}">{{ t('export_csv') }} ↓</a><form method="post" action="{{ url_for('admin_logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-outline">{{ t('logout') }}</button></form></div></div>
-<div class="metric-grid"><div class="metric-card"><small>{{ t('total_cases') }}</small><strong>{{ total_count }}</strong><span>{{ t('latest_records') }}</span></div><div class="metric-card"><small>{{ t('new')|upper }}</small><strong>{{ new_count }}</strong><span>{{ t('new_waiting') }}</span></div><div class="metric-card"><small>{{ t('in_review') }}</small><strong>{{ reviewing_count }}</strong><span>{{ t('active_assessment') }}</span></div><div class="metric-card"><small>{{ t('priority_flags') }}</small><strong>{{ priority_count }}</strong><span>{{ t('human_triage') }}</span></div></div>
-<div class="dashboard-toolbar"><h2>{{ t('recent_submissions') }}</h2><span>{{ t('newest_first') }}</span></div>{% if items %}<div class="table-wrap"><table><thead><tr><th>{{ t('case_requester') }}</th><th>{{ t('category') }}</th><th>{{ t('priority') }}</th><th>{{ t('review_indicators') }}</th><th>{{ t('status_label') }}</th><th>{{ t('received') }}</th><th>{{ t('action') }}</th></tr></thead><tbody>{% for item in items %}<tr><td><b>{{ item.case_ref or ('#' ~ item.id) }}</b><small class="table-sub">{{ item.name }} · {{ item.email }}</small></td><td>{{ t('cat_' ~ item.topic) }}<small class="table-sub">{{ t('platform_' ~ ('none' if item.platform == 'not-specified' else item.platform)) }}</small></td><td><span class="priority-pill {{ item.urgency or 'normal' }}">{{ t('priority_' ~ (item.urgency or 'normal'))|upper }}</span></td><td><span class="risk-score">{{ item.risk_score or 0 }}/90</span><small class="table-sub">{{ item.risk_flags or t('no_indicators') }}</small></td><td><span class="status-pill {{ item.status }}">{{ t(item.status) }}</span></td><td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td><td><a class="mini-button" href="{{ url_for('case_detail',case_id=item.id) }}">{{ t('open_report') }} →</a></td></tr>{% endfor %}</tbody></table></div>{% else %}<p>{{ t('no_cases') }}</p>{% endif %}</section>{% endblock %}
+{% extends 'base.html' %}
+{% block title %}{{ t('admin_title') }} — YAKUZA{% endblock %}
+{% block content %}
+<section class="admin-page">
+  <div class="admin-head">
+    <div>
+      <span class="section-kicker">{{ t('internal') }}</span>
+      <h1>{{ t('admin_title') }}</h1>
+      <p class="admin-subtitle">{{ t('admin_subtitle') }}</p>
+    </div>
+    <div class="admin-actions">
+      <a class="button button-outline" href="{{ url_for('export_inquiries') }}">{{ t('export_csv') }} ↓</a>
+      <form method="post" action="{{ url_for('admin_logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="button button-outline" type="submit">{{ t('logout') }}</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="metric-grid" aria-label="{{ t('dashboard_metrics') }}">
+    <div class="metric-card"><small>{{ t('total_cases') }}</small><strong>{{ total_count }}</strong><span>{{ t('latest_records') }}</span></div>
+    <div class="metric-card"><small>{{ t('new')|upper }}</small><strong>{{ new_count }}</strong><span>{{ t('new_waiting') }}</span></div>
+    <div class="metric-card"><small>{{ t('in_review') }}</small><strong>{{ reviewing_count }}</strong><span>{{ t('active_assessment') }}</span></div>
+    <div class="metric-card"><small>{{ t('priority_flags') }}</small><strong>{{ priority_count }}</strong><span>{{ t('human_triage') }}</span></div>
+  </div>
+
+  <div class="dashboard-toolbar">
+    <div class="dashboard-heading">
+      <h2>{{ t('recent_submissions') }}</h2>
+      <p class="filter-count" id="case-filter-count" role="status" aria-live="polite"
+         data-count-template="{{ t('dashboard_showing') }}">{{ t('dashboard_showing').replace('__visible__', items|length|string).replace('__total__', items|length|string) }}</p>
+    </div>
+    {% if items %}
+    <div class="dashboard-filters" role="search" aria-label="{{ t('dashboard_filter') }}">
+      <label class="sr-only" for="case-search">{{ t('dashboard_search_placeholder') }}</label>
+      <input class="field filter-field" type="search" id="case-search" placeholder="{{ t('dashboard_search_placeholder') }}" autocomplete="off" spellcheck="false">
+      <label class="sr-only" for="case-status-filter">{{ t('dashboard_status_filter') }}</label>
+      <select class="field filter-field" id="case-status-filter">
+        <option value="all">{{ t('dashboard_all_statuses') }}</option>
+        <option value="new">{{ t('new') }}</option>
+        <option value="reviewing">{{ t('reviewing') }}</option>
+        <option value="closed">{{ t('closed') }}</option>
+      </select>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if items %}
+  <div class="table-wrap" role="region" tabindex="0" aria-label="{{ t('cases_table_label') }}">
+    <table>
+      <thead><tr>
+        <th scope="col">{{ t('case_requester') }}</th>
+        <th scope="col">{{ t('category') }}</th>
+        <th scope="col">{{ t('priority') }}</th>
+        <th scope="col">{{ t('review_indicators') }}</th>
+        <th scope="col">{{ t('status_label') }}</th>
+        <th scope="col">{{ t('received') }}</th>
+        <th scope="col">{{ t('action') }}</th>
+      </tr></thead>
+      <tbody id="case-table-body">
+        {% for item in items %}
+        <tr data-case-row data-case-status="{{ item.status }}">
+          <td><b>{{ item.case_ref or ('#' ~ item.id) }}</b><small class="table-sub">{{ item.name }} · {{ item.email }}</small></td>
+          <td>{{ t('cat_' ~ item.topic) }}<small class="table-sub">{{ t('platform_' ~ ('none' if item.platform == 'not-specified' else item.platform)) }}</small></td>
+          <td><span class="priority-pill {{ item.urgency or 'normal' }}">{{ t('priority_' ~ (item.urgency or 'normal'))|upper }}</span></td>
+          <td><span class="risk-score">{{ item.risk_score or 0 }}/90</span><small class="table-sub">{% if item.risk_flags %}{% for flag in item.risk_flags.split(',') %}{{ t('flag_' ~ flag.strip()) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}{{ t('no_indicators') }}{% endif %}</small></td>
+          <td><span class="status-pill {{ item.status }}">{{ t(item.status) }}</span></td>
+          <td>{{ item.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td><a class="mini-button" href="{{ url_for('case_detail', case_id=item.id) }}">{{ t('open_report') }} →</a></td>
+        </tr>
+        {% endfor %}
+        <tr id="case-filter-empty" hidden><td colspan="7">{{ t('dashboard_no_matches') }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="empty-state">{{ t('no_cases') }}</p>
+  {% endif %}
+  <p class="dashboard-footnote">{{ t('dashboard_recent_limit') }}</p>
+</section>
+{% endblock %}

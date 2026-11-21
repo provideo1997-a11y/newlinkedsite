@@ -1,23 +1,26 @@
-# v8 build verification
+# YAKUZA v9 build verification
 
-Validation performed against the project source included in this archive:
+Validation performed against the source tree included in this archive:
 
-- `pytest -q`: 11 tests passed.
+- `pytest -q`: **18 tests passed** (security helpers, locale catalogs, UI translation coverage, shell semantics, dashboard filters, case-report actions and progressive loader rules).
 - `python -m compileall -q .`: passed.
 - `node --check static/js/app.js`: passed.
 - Jinja parsing: all 10 HTML templates parsed successfully.
-- `render.yaml`: parsed successfully; the configured health-check path and Gunicorn start command were present.
-- Commit helper file coverage: all project files in this release are included in the explicit staging list.
-- Runtime artifact scan: no `.env`, SQLite database, or backup file is included.
-- ZIP integrity: checked after archive creation.
+- Representative Jinja rendering: the public intake form, admin dashboard and case report rendered with fixture data; new form attributes and interactive hooks appeared in output.
+- `render.yaml`: parsed successfully; `/health` and the Gunicorn start command were checked.
+- Contrast spot checks: small muted text/placeholder colors were raised in the dark UI; final values are `#9aa6aa` / `#879198` on dark surfaces. This is a targeted contrast correction, not a complete WCAG audit.
+- Commit helper: `bash -n COMMIT_UPDATE.sh` passed. The PowerShell helper is included but was not executed because PowerShell is unavailable in this environment.
+- Dependency delta: no new runtime packages were introduced.
+- Release hygiene: the ZIP excludes `.env`, instance database files, backups, browser previews and local caches.
+- ZIP integrity and SHA-256 checksum: verified after archive creation.
 
 Not performed in this environment:
 
-- Import/startup of the full Flask application with its third-party dependencies installed.
-- A live PostgreSQL connection or migration against the existing production database.
-- An authenticated test against the actual Render service.
-- A real WhatsApp hand-off using the configured business number.
-- A penetration test or independent security audit.
-- A push or commit to the remote GitHub repository.
+- Full Flask application startup or route integration test. Flask dependencies were not preinstalled and the package index could not be reached from this environment.
+- Live PostgreSQL connection or migration against the production database.
+- Actual Render deployment, authenticated test against the live service, or GitHub commit/push.
+- Real WhatsApp hand-off with the configured destination number.
+- End-to-end interactive browser test or assistive-technology validation; the headless browser launch was blocked by the execution environment.
+- Independent penetration test, accessibility certification, load test or Core Web Vitals measurement.
 
-The v8 release is therefore a source-validated, commit-ready update, not a claim of verified production deployment.
+The archive is therefore a source-validated, commit-ready full replacement with focused UI regression tests. It is not a claim that a live production deployment has been verified.

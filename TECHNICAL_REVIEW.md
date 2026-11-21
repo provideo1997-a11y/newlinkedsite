@@ -24,3 +24,10 @@
 
 ## Test status
 Static syntax/structure and ZIP integrity checks should be run before release. A real deployment must also complete the manual end-to-end checklist in `FREE_HOSTING_AND_DOMAIN_GUIDE.md` and `SECURITY_ARCHITECTURE.md`.
+
+
+## UI/UX and accessibility review (v9)
+
+The v9 interface work is documented in `UI_UX_REVIEW.md`. The existing dark charcoal/lime visual identity and Flask/Jinja plus vanilla JavaScript architecture were retained. The dashboard now supports client-side search and status filtering over the 250 most recent rendered cases, with the existing CSV route retained for full export. Case reports support reference copying and browser printing.
+
+Accessibility work includes skip navigation, semantic main/nav landmarks, current-page nav state, focus-visible rings, localized screen-reader labels, a progressively-enhanced loader, native form validation, and reduced-motion/print rules. These changes were source- and template-tested. They were not certified by an independent WCAG audit or a live assistive-technology test.

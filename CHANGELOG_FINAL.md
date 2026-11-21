@@ -22,3 +22,14 @@
 - Normalized Render `postgres://` and `postgresql://` database URLs to the installed `psycopg` 3 SQLAlchemy dialect.
 - Corrected local setup instructions: `.env` is not implicitly loaded by `python app.py`; shell environment variables are used instead.
 - Hardened CSV formula detection for leading BOM and common invisible whitespace/control characters.
+
+
+## v9 — UI, accessibility and admin workflow refresh
+
+- Added skip navigation, labelled landmarks, active navigation state, and clear keyboard focus indicators.
+- Made the loader progressive-enhancement only so it cannot block no-JavaScript visitors.
+- Added 11-locale translated case search, status filters, visible-row counts, empty-filter feedback, triage flags and admin success/error messages for the 250 most recent dashboard rows.
+- Added one-click case reference copying with assistive-technology feedback and printable case reports.
+- Restored native browser validation, exposed the story counter to assistive technology, and used a native date input.
+- Improved contrast for muted placeholders and small interface labels, responsive dashboard controls, and reduced-motion/print behavior.
+- Added source-based UI review and regression tests. No new runtime packages were introduced.

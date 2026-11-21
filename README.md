@@ -15,6 +15,19 @@ python app.py
 
 For production, set environment variables in Render. Do not commit `.env`, credentials, customer data, SQLite databases, or backups.
 
+
+## UI release (v9)
+
+This release keeps the existing Flask/Jinja, CSS and vanilla JavaScript stack and adds:
+- A keyboard skip link, labelled landmarks, current-page navigation state, explicit focus-visible styles, and more legible muted text.
+- A progressive loading overlay that is enabled only when JavaScript is available; users without JavaScript are not blocked by the loader.
+- Dashboard search and status filters for the 250 newest rows already loaded on the page. Filtering is client-side and does not change server-side case access or the complete CSV export.
+- Localized dashboard controls and accessibility labels in all 11 bundled admin locales.
+- Case-reference copy feedback, report printing, and print-specific styles.
+- Native browser form validation, a date input, and an accessible character-counter description.
+
+No frontend framework or new runtime dependency was added. See `UI_UX_REVIEW.md` for the source-based UI review, shipped changes, performance considerations and future roadmap.
+
 ## Render deployment
 
 - Root Directory: blank when the contents of this folder are at repository root.

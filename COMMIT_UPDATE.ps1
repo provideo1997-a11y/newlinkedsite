@@ -1,32 +1,20 @@
 $ErrorActionPreference = 'Stop'
-
 git rev-parse --show-toplevel *> $null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Run this script from inside the existing Git repository.'
-}
-
-$files = @(
-    '.env.example', '.gitignore', 'APPLY_UPDATE.md', 'BUILD_VERIFICATION.md', 'CHANGELOG_FINAL.md',
-    'COMMIT_UPDATE.sh', 'COMMIT_UPDATE.ps1', 'FREE_HOSTING_AND_DOMAIN_GUIDE.md',
-    'Procfile', 'README.md', 'RENDER_FREE_LIMITS.md', 'SECURITY_ARCHITECTURE.md',
-    'TECHNICAL_REVIEW.md', 'app.py', 'render.yaml', 'requirements.txt',
-    'runtime.txt', 'security_utils.py', 'pytest.ini',
-    'static/css/style.css', 'static/img/mark.svg', 'static/img/yakuza-network.webp',
-    'static/img/yakuza-shield.webp', 'static/js/app.js',
-    'templates/about.html', 'templates/admin.html', 'templates/admin_login.html',
-    'templates/base.html', 'templates/case_detail.html', 'templates/contact.html',
-    'templates/index.html', 'templates/privacy.html', 'templates/services.html',
-    'templates/submitted.html',
-    'tests/conftest.py', 'tests/test_security_utils.py', 'tests/test_translation_catalog.py'
-)
-
-git add -- $files
+if ($LASTEXITCODE -ne 0) { throw 'Run this script inside the existing Git repository.' }
+$trackedEnv = git ls-files | Where-Object { $_ -match '^\.env($|\.)' -and $_ -ne '.env.example' }
+if ($trackedEnv) { throw "Refusing to stage tracked environment secrets: $($trackedEnv -join ', '). Untrack them and rotate exposed secrets first." }
+$trackedData = git ls-files -- 'instance/**' '*.db' '*.sqlite' '*.sqlite3'
+if ($trackedData) { throw 'Refusing to stage: database/instance files are tracked. Back them up and remove from Git index/history first.' }
+git add -A
 if ($LASTEXITCODE -ne 0) { throw 'git add failed.' }
 git diff --cached --check
 if ($LASTEXITCODE -ne 0) { throw 'Staged diff check failed.' }
+Write-Host "Target branch: $(git branch --show-current)"
 git diff --cached --stat
-
-git commit -m "Fix YAKUZA startup, PostgreSQL and admin translations"
-if ($LASTEXITCODE -ne 0) { throw 'git commit failed.' }
+git status --short
+$answer = Read-Host 'Type COMMIT to create and push this change'
+if ($answer -cne 'COMMIT') { throw 'Cancelled; staged changes were left for review.' }
+git commit -m "Refresh YAKUZA UI, accessibility and case workflows"
+if ($LASTEXITCODE -ne 0) { throw 'Commit failed. Review staged changes.' }
 git push origin HEAD
-if ($LASTEXITCODE -ne 0) { throw 'git push failed. Check the current branch upstream and authentication.' }
+if ($LASTEXITCODE -ne 0) { throw 'Push failed. Check your current branch upstream and GitHub authentication.' }

@@ -1,26 +1,49 @@
-# Apply this update to the existing GitHub repository
+# Apply YAKUZA v9 to the existing GitHub repository
 
-This release is packaged with `app.py`, `requirements.txt`, `render.yaml`, templates, static assets, tests, and documentation at the archive root. Extract the archive into the root of the existing `newlinkedsite` repository, replacing only the matching project files. Do not upload `.env`, `instance/`, database files, backups, screenshots containing credentials, or any other private data.
+This archive is a full project-root replacement. It contains `app.py`, `requirements.txt`, `render.yaml`, templates, static assets, tests and documentation at the ZIP root.
 
-Before replacing files, use GitHub's commit history or a local clone to preserve any changes made after the uploaded source archive. This release is based on the uploaded YAKUZA project, not a live read of the remote repository.
+## Safe replacement procedure
 
-## Commit from a local clone
+1. Make a local copy of the current repository and take a verified database backup before changing production code.
+2. Open your existing local clone of `provideo1997-a11y/newlinkedsite`. Confirm you are on the same branch that the existing Render service deploys.
+3. Keep the repository's `.git/` directory. Do not delete it. Do not include or overwrite `.env`, `instance/`, SQLite databases, backups, or private uploads.
+4. Remove the old tracked project source files from the working tree (leaving `.git/` and ignored local secret/data files untouched), then extract **all contents of this ZIP** into the repository root. The ZIP has no enclosing project folder.
+5. Check that `app.py`, `requirements.txt`, `render.yaml`, `templates/`, `static/`, and `tests/` are at the repository root.
+6. Review `git status --short` and confirm no `.env`, database, backup, unrelated file, or secret is staged. Run the checks below.
+7. Run `./COMMIT_UPDATE.sh` (Git Bash/macOS/Linux) or `./COMMIT_UPDATE.ps1` (PowerShell). Review the staged summary; the script asks you to type `COMMIT` before creating the commit and pushing the current branch. Confirm that this branch is the existing Render deployment branch. Do not force-push.
 
-On macOS/Linux or Git Bash, run `./COMMIT_UPDATE.sh`. On Windows PowerShell, run `./COMMIT_UPDATE.ps1`. Each script stages only the files belonging to this project, checks the staged diff, creates a commit, and attempts to push the current branch to `origin`. Review the staged file list before running it.
+## Local checks
 
-If `git status` shows unrelated local work, stage only the files from this release instead of using `git add .`. Do not force-push.
+```bash
+python -m pip install -r requirements.txt
+python -m compileall -q .
+node --check static/js/app.js
+pytest -q
+```
 
-## Existing Render service
+The tests in this package validate translation catalogs, WhatsApp/database URL helpers, CSV safety, the UI copy catalog, and dashboard/report template hooks. Run the app locally with a disposable SQLite database and dummy admin credentials before deploying.
 
-Keep the currently linked Render service and its deployment branch. Push the commit to that branch, then allow the existing service to deploy. Do not create a second service from `render.yaml`. Preserve the existing `DATABASE_URL` and confirm it points to the intended database before deploying. Preserve existing admin bootstrap variables where they are in use; they are only needed for initial provisioning or a deliberate password reset. The app now uses the installed psycopg 3 driver for PostgreSQL URLs.
+## Render settings
 
-## Required checks after deployment
+Keep your existing Render Web Service, repository, branch and environment variables. The expected settings are:
 
-1. `/health` returns `200` and `{"status":"ok","service":"yakuza"}`.
-2. The public form opens in all available locales.
-3. The admin login, dashboard, case report, status update and CSV export work.
-4. The admin language selection remains selected after login.
-5. A test number entered in `WHATSAPP_NUMBER` produces a valid `wa.me` link.
-6. Confirm the test case is present in the intended persistent database before accepting real submissions.
+- Root Directory: blank when the project files are in repository root
+- Build Command: `pip install -r requirements.txt`
+- Start Command: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
+- Health Check Path: `/health`
 
-This repository update does not migrate or delete existing database records. The application performs the existing additive schema migration at startup; take a database backup before deployment when real records are present.
+Do not create a second Render service from `render.yaml`. Preserve the existing `DATABASE_URL`; back it up and verify it points to the intended database before deployment. Do not set `RESET_ADMIN_PASSWORD=1` unless deliberately rotating the admin password for one deployment.
+
+## Checks after deployment
+
+1. `GET /health` returns HTTP 200 and the JSON status response.
+2. Submit one disposable test case and confirm it is saved exactly once.
+3. Check that the admin login, dashboard search/status filters, case report, status update and CSV export work. The dashboard filters only the 250 most recent server-rendered rows; CSV export remains the complete export.
+4. Test copy-reference and print actions in an HTTPS browser.
+5. Test all 11 admin locales, including Arabic RTL and Tunisian Arabic.
+6. Test WhatsApp using a controlled number before enabling customer hand-off.
+7. Confirm the test case is in the intended durable database before accepting real submissions.
+
+## Verification boundary
+
+This package was validated with Python compilation, JavaScript syntax checking, pytest, Jinja template parsing/rendering and YAML parsing in the build environment. The build environment could not install Flask dependencies or reach your GitHub/Render project, so a full Flask startup, live database migration, real browser/assistive-technology session, live WhatsApp hand-off and production deployment were not verified here.
