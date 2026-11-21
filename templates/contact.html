@@ -19,7 +19,7 @@
     </div>
   </aside>
   <div class="form-panel case-form-panel">
-    <form method="post" action="{{ url_for('contact') }}" id="case-create-form" data-csrf-retry="{{ '1' if csrf_retry|default(false) else '0' }}">
+    <form method="post" action="{{ url_for('contact') }}" id="case-create-form">
       {{ form.hidden_tag() }}
       <div class="honeypot">{{ form.website.label }}{{ form.website() }}</div>
       <div class="form-section-title"><span>01</span><div><b>{{ t('step_identity') }}</b><small>{{ t('required_note') }}</small></div></div>
