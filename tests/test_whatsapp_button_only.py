@@ -4,11 +4,11 @@ import ast
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_first_page_has_one_create_case_submit_and_no_whatsapp_button():
+def test_first_page_has_one_create_case_submit_and_no_whatsapp_choice():
     form = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
     assert form.count('type="submit"') == 1
-    assert 't(\'create_secure_case\')' in form
-    assert 't(\'send_to_whatsapp\')' not in form
+    assert "t('create_secure_case')" in form
+    assert "t('send_to_whatsapp')" not in form
     assert 'contact-choice' not in form
     assert 'name="contact_method"' not in form
     assert 'whatsapp-consent' in form and 'required' in form
@@ -18,7 +18,7 @@ def test_second_page_has_exactly_one_whatsapp_action():
     page = (ROOT / 'templates/case_ready.html').read_text(encoding='utf-8')
     assert page.count('id="case-ready-whatsapp"') == 1
     assert page.count('<a ') == 1
-    assert 't(\'case_ready_send\')' in page
+    assert "t('case_ready_send')" in page
 
 
 def test_success_is_post_redirect_get_to_signed_saved_case_page():
@@ -27,7 +27,7 @@ def test_success_is_post_redirect_get_to_signed_saved_case_page():
     end = source.index("@app.get('/case/ready/<token>')", start)
     route = source[start:end]
     assert 'db.session.commit()' in route
-    assert "redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)" in route
+    assert "redirect(url_for('case_ready', token=issue_case_handoff_token(case_ref)), code=303)" in route
     assert 'whatsapp_success' not in source
 
 
@@ -46,6 +46,7 @@ def test_all_locales_have_both_create_and_send_labels():
 
 def test_fragile_ajax_submission_is_removed_from_contact_javascript():
     js = (ROOT / 'static/js/app.js').read_text(encoding='utf-8')
-    assert 'Reliable single-button intake' not in js
     assert 'fetch(form.action' not in js
     assert 'case-intake-form' not in js
+    assert 'case-create-form' in js
+    assert 'button.disabled = true' in js

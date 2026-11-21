@@ -7,7 +7,7 @@ from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from wtforms import StringField, EmailField, SelectField, TextAreaField, PasswordField, SubmitField, HiddenField
+from wtforms import StringField, EmailField, SelectField, TextAreaField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, Email, Length, Optional
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -16,7 +16,7 @@ import sys
 from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from time import perf_counter
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from itsdangerous import URLSafeTimedSerializer, BadSignature
 from security_utils import normalize_database_url, merge_locale_translations, csv_safe, sqlalchemy_engine_options, normalize_whatsapp_number, ensure_unique_case_reference_index
 from whatsapp_utils import build_case_whatsapp_url
 
@@ -569,43 +569,10 @@ class InquiryForm(FlaskForm):
     platform=SelectField(choices=[('not-specified','Not specified'),('instagram','Instagram'),('facebook','Facebook'),('tiktok','TikTok'),('google','Google'),('x','X'),('linkedin','LinkedIn'),('other','Other')], validators=[DataRequired()])
     website=StringField(validators=[Optional(),Length(max=0)])
     whatsapp_consent=StringField(validators=[Optional(),Length(max=3)])
-    case_token=HiddenField(validators=[DataRequired(), Length(max=255)])
     submit=SubmitField()
 class LoginForm(FlaskForm):
     username=StringField(validators=[DataRequired(),Length(max=80)])
     password=PasswordField(validators=[DataRequired(),Length(max=200)])
-
-_case_token_serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'], salt='yakuza-case-intake-v1')
-
-
-def issue_case_token():
-    """Issue a signed idempotency reference for this individual form tab."""
-    case_ref = 'YKZ-' + datetime.now(timezone.utc).strftime('%y%m%d') + '-' + secrets.token_hex(6).upper()
-    return _case_token_serializer.dumps({'ref': case_ref})
-
-
-def _validate_case_token_payload(payload):
-    if not isinstance(payload, dict) or not re.fullmatch(
-        r'YKZ-[0-9]{6}-[A-F0-9]{12}', str(payload.get('ref', ''))
-    ):
-        raise BadSignature('Invalid intake token payload')
-    return payload
-
-
-def read_case_token(token):
-    """Read a signed per-form reference for up to seven days."""
-    payload = _case_token_serializer.loads(token or '', max_age=7 * 24 * 60 * 60)
-    return _validate_case_token_payload(payload)
-
-
-def refresh_case_token(token):
-    """Refresh an authentic old form token without changing its case reference."""
-    try:
-        payload = _case_token_serializer.loads(token or '', max_age=30 * 24 * 60 * 60)
-        payload = _validate_case_token_payload(payload)
-        return _case_token_serializer.dumps({'ref': payload['ref']}), True
-    except BadSignature:
-        return issue_case_token(), False
 
 class Inquiry(db.Model):
     id=db.Column(db.Integer,primary_key=True)
@@ -680,79 +647,41 @@ def about(): return render_template('about.html')
 @app.route('/contact', methods=['GET', 'POST'])
 @limiter.limit(os.environ.get('INTAKE_RATE_LIMIT', '30 per hour'), methods=['POST'])
 def contact():
-    """Save a case with a normal POST, then show a separate WhatsApp page."""
+    """Simple two-page intake: save the case, then show one WhatsApp button."""
     form = InquiryForm()
-    support_reference = uuid.uuid4().hex[:12].upper()
-
-    def render_form_error(message, status=400, renew_token=False, code=None):
-        # Preserve submitted values. Reuse the signed idempotency reference where
-        # possible so a retry after a lost response cannot create another case.
-        if renew_token or not form.case_token.data:
-            form.case_token.data = issue_case_token()
-        else:
-            try:
-                read_case_token(form.case_token.data)
-            except BadSignature:
-                form.case_token.data = issue_case_token()
-        flash(message if not code else f'{message} (Reference: {support_reference})', 'error')
-        return render_template('contact.html', form=form), status
 
     if request.method == 'GET':
-        form.case_token.data = issue_case_token()
         return render_template('contact.html', form=form)
 
-    # Flask-WTF/CSRFProtect validates the hidden CSRF token before this route.
+    # Flask-WTF validates the ordinary session CSRF token. No custom per-form
+    # challenge, AJAX request, signed intake token, or retry loop is involved.
     if not form.validate_on_submit():
-        return render_form_error(tr('intake_form_error'), 400)
+        flash(tr('intake_form_error'), 'error')
+        return render_template('contact.html', form=form), 400
 
-    try:
-        token_data = read_case_token(form.case_token.data)
-    except SignatureExpired:
-        renewed_token, reusable = refresh_case_token(form.case_token.data)
-        form.case_token.data = renewed_token
-        if not reusable:
-            return render_form_error(tr('intake_csrf_error'), 400)
-        token_data = read_case_token(renewed_token)
-    except BadSignature:
-        return render_form_error(tr('intake_csrf_error'), 400, renew_token=True)
-
-    submitted_ref = token_data['ref']
     if form.website.data:
         abort(400)
     if form.authorization.data != 'yes':
-        return render_form_error(tr('intake_form_error'), 400)
+        flash(tr('intake_form_error'), 'error')
+        return render_template('contact.html', form=form), 400
     if form.whatsapp_consent.data != 'yes':
-        return render_form_error(tr('whatsapp_consent_required'), 400)
+        flash(tr('whatsapp_consent_required'), 'error')
+        return render_template('contact.html', form=form), 400
 
-    configured_whatsapp = os.environ.get('WHATSAPP_NUMBER', '')
-    if not normalize_whatsapp_number(configured_whatsapp):
-        app.logger.error('intake_failure support_ref=%s stage=configuration reason=invalid_whatsapp_number', support_reference)
-        return render_form_error(tr('whatsapp_configuration_error'), 503, code='WHATSAPP_CONFIGURATION')
-
-    started = perf_counter()
-    stage = 'idempotency_lookup'
-    try:
-        # The signed token is unique per rendered form and stable across retries.
-        existing = Inquiry.query.filter_by(case_ref=submitted_ref).first()
-        if existing is not None:
-            if not build_case_whatsapp_url(configured_whatsapp, existing):
-                return render_form_error(tr('whatsapp_configuration_error'), 503)
-            app.logger.info('intake_reused case_ref=%s elapsed_ms=%d', submitted_ref, int((perf_counter() - started) * 1000))
-            return redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)
-    except Exception as exc:
-        db.session.rollback()
-        app.logger.exception('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
-        return render_form_error(tr('case_save_failed'), 503, code='DATABASE_UNAVAILABLE')
+    whatsapp_number = normalize_whatsapp_number(os.environ.get('WHATSAPP_NUMBER', ''))
+    if not whatsapp_number:
+        app.logger.error('case_intake_rejected reason=whatsapp_not_configured')
+        flash(tr('whatsapp_configuration_error'), 'error')
+        return render_template('contact.html', form=form), 503
 
     if form.evidence_url.data:
-        from urllib.parse import urlsplit, urlunsplit
-        raw_evidence = form.evidence_url.data.strip()
-        parsed = urlsplit(raw_evidence)
-        if (parsed.scheme.lower() != 'https' or not parsed.hostname or parsed.username or parsed.password
-                or any(ord(ch) < 32 for ch in raw_evidence)):
-            form.evidence_url.errors.append('Enter a valid public HTTPS link without embedded credentials.')
-            return render_form_error(tr('intake_form_error'), 400)
-        form.evidence_url.data = urlunsplit(('https', parsed.netloc.lower(), parsed.path or '/', parsed.query, ''))
+        from urllib.parse import urlsplit
+        evidence = form.evidence_url.data.strip()
+        parsed = urlsplit(evidence)
+        if parsed.scheme.lower() != 'https' or not parsed.netloc or parsed.username or parsed.password:
+            form.evidence_url.errors.append('Enter a valid HTTPS evidence link.')
+            flash(tr('intake_form_error'), 'error')
+            return render_template('contact.html', form=form), 400
 
     message = form.message.data.strip()
     patterns = [
@@ -770,12 +699,14 @@ def contact():
         'Limitations: text heuristics can produce false positives and false negatives. A human reviewer must assess context.'
     )
 
-    try:
-        stage = 'case_prepare'
+    # Generate the reference on the server. The database unique constraint
+    # remains the final guard against an astronomically unlikely collision.
+    for attempt in range(3):
+        case_ref = 'YKZ-' + datetime.now(timezone.utc).strftime('%y%m%d') + '-' + secrets.token_hex(6).upper()
         item = Inquiry(
-            case_ref=submitted_ref,
-            name=form.name.data.strip(),
-            email=form.email.data.strip().lower(),
+            case_ref=case_ref,
+            name=(form.name.data or '').strip(),
+            email=(form.email.data or '').strip().lower(),
             topic=form.topic.data,
             message=message,
             platform=form.platform.data,
@@ -790,44 +721,27 @@ def contact():
             contact_method='whatsapp',
             created_at=datetime.now(timezone.utc),
         )
-        db.session.add(item)
-        stage = 'database_flush'
-        db.session.flush()
-        stage = 'whatsapp_message_build'
-        if not build_case_whatsapp_url(configured_whatsapp, item):
-            db.session.rollback()
-            return render_form_error(tr('whatsapp_configuration_error'), 503)
-        stage = 'database_commit'
-        db.session.commit()
-        app.logger.info('intake_committed support_ref=%s case_ref=%s elapsed_ms=%d', support_reference, submitted_ref, int((perf_counter() - started) * 1000))
-        return redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)
-
-    except IntegrityError as exc:
-        db.session.rollback()
-        # Another request using the same signed form token may have committed first.
         try:
-            existing = Inquiry.query.filter_by(case_ref=submitted_ref).first()
-            if existing is not None and build_case_whatsapp_url(configured_whatsapp, existing):
-                app.logger.info('intake_idempotent_race_recovered case_ref=%s', submitted_ref)
-                return redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)
-        except Exception as recovery_error:
+            # Check the destination and prepare the complete draft before saving.
+            if not build_case_whatsapp_url(whatsapp_number, item):
+                flash(tr('whatsapp_configuration_error'), 'error')
+                return render_template('contact.html', form=form), 503
+            db.session.add(item)
+            db.session.commit()
+            app.logger.info('case_intake_saved case_ref=%s', case_ref)
+            return redirect(url_for('case_ready', token=issue_case_handoff_token(case_ref)), code=303)
+        except IntegrityError:
             db.session.rollback()
-            app.logger.exception('intake_race_recovery_failed support_ref=%s case_ref=%s error_type=%s', support_reference, submitted_ref, type(recovery_error).__name__)
-        app.logger.exception('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
-        return render_form_error(tr('case_save_failed'), 503, code='CASE_CONFLICT_OR_DATABASE_ERROR')
-    except Exception as exc:
-        db.session.rollback()
-        # A network failure can happen after commit but before the redirect arrives.
-        # Re-query by the same signed reference before showing an error.
-        try:
-            existing = Inquiry.query.filter_by(case_ref=submitted_ref).first()
-            if existing is not None and build_case_whatsapp_url(configured_whatsapp, existing):
-                app.logger.warning('intake_commit_result_recovered case_ref=%s', submitted_ref)
-                return redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)
+            if attempt < 2:
+                continue
+            app.logger.exception('case_intake_failed stage=unique_reference')
         except Exception:
             db.session.rollback()
-        app.logger.exception('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
-        return render_form_error(tr('case_save_failed'), 503, code='CASE_SAVE_FAILED')
+            app.logger.exception('case_intake_failed stage=save')
+            break
+
+    flash(tr('case_save_failed'), 'error')
+    return render_template('contact.html', form=form), 503
 
 
 @app.get('/case/ready/<token>')
@@ -849,12 +763,8 @@ def case_ready(token):
 
 @app.errorhandler(429)
 def handle_rate_limit(error):
-    message = tr('intake_rate_limited')
-    flash(message, 'error')
+    flash(tr('intake_rate_limited'), 'error')
     form = InquiryForm(formdata=request.form if request.method == 'POST' else None)
-    case_token, _reusable = refresh_case_token(form.case_token.data)
-    form.case_token.data = case_token
-    form.csrf_token.data = generate_csrf()
     return render_template('contact.html', form=form), 429
 
 
@@ -866,15 +776,12 @@ def handle_csrf_error(error):
             return render_template('admin_login.html', form=LoginForm()), 400
         return render_template('index.html'), 400
 
-    # Preserve entered values, refresh CSRF, and keep the same case reference
-    # where its signature is still valid. No arithmetic test exists in this flow.
+    # Preserve submitted fields. Flask-WTF generates a fresh CSRF token
+    # when the form is rendered again.
     form = InquiryForm(formdata=request.form if request.method == 'POST' else None)
-    submitted_case_token = request.form.get('case_token', '')
-    case_token, _reusable = refresh_case_token(submitted_case_token)
-    form.case_token.data = case_token
-    form.csrf_token.data = generate_csrf()
     flash(tr('intake_csrf_error'), 'error')
     return render_template('contact.html', form=form), 400
+
 
 @app.errorhandler(Exception)
 def handle_unexpected_error(error):
@@ -994,7 +901,7 @@ with app.app_context():
         if col not in cols: db.session.execute(text(f'ALTER TABLE inquiry ADD COLUMN {col} {definition}'))
     db.session.commit()
     # Existing databases upgraded with ALTER TABLE do not receive new model
-    # constraints automatically. Enforce uniqueness for idempotent retries.
+    # constraints automatically. Enforce uniqueness for generated case references.
     ensure_unique_case_reference_index(db.engine)
     username=os.environ.get('ADMIN_USERNAME'); password=os.environ.get('ADMIN_PASSWORD')
     if username and password:

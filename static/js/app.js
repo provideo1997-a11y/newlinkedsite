@@ -90,6 +90,16 @@
     }, { passive: true });
   }
 })();
+// Keep the simple HTML form flow; only prevent accidental double-clicks.
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('case-create-form');
+  if (!form) return;
+  form.addEventListener('submit', () => {
+    const button = form.querySelector('button[type="submit"]');
+    if (button) button.disabled = true;
+  }, { once: true });
+});
+
 // Live character counter for the case description.
 document.addEventListener('DOMContentLoaded',()=>{const field=document.getElementById('case-story');const count=document.getElementById('story-count');if(field&&count){const update=()=>{count.textContent=String(field.value.length);count.style.color=field.value.length>=25?'#c8ff3d':'#96a3a4'};field.addEventListener('input',update);update();}});
 

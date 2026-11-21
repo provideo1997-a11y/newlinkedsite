@@ -84,9 +84,9 @@ def ensure_unique_case_reference_index(engine) -> bool:
     """Ensure an existing Inquiry table enforces unique, non-null case references.
 
     SQLAlchemy ``create_all`` does not add constraints/indexes to a table that
-    already existed before the model gained ``unique=True``. The idempotent
-    intake path relies on this invariant for concurrent retries, so add an
-    explicit unique index when the database lacks one. Returns True only when
+    already existed before the model gained ``unique=True``. New server-side
+    case references must remain unique, so add an explicit unique index when
+    the database lacks one. Returns True only when
     an index was created. Existing duplicate non-null references are reported
     as a migration error instead of silently weakening duplicate protection.
     """
