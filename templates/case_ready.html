@@ -20,6 +20,10 @@
     </dl>
     <a class="button button-primary case-submit case-ready-send" id="case-ready-whatsapp" href="{{ whatsapp_url }}">{{ t('case_ready_send') }} <span aria-hidden="true">↗</span></a>
     <p class="submit-footnote">{{ t('case_ready_note') }}</p>
+    <details class="case-ready-preview">
+      <summary>{{ t('case_ready_preview') }}</summary>
+      <pre>{{ whatsapp_message }}</pre>
+    </details>
   </div>
 </section>
 {% endblock %}
