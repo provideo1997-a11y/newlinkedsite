@@ -90,11 +90,51 @@
     }, { passive: true });
   }
 })();
-// Keep the simple HTML form flow; only prevent accidental double-clicks.
+// Keep the simple server-rendered form, but retain a private per-tab draft so
+// a timeout, expired CSRF token, or accidental refresh never forces retyping.
+const CASE_DRAFT_KEY = 'yakuza.case-draft.v1';
 document.addEventListener('DOMContentLoaded', () => {
+  const readyPage = document.getElementById('case-ready-whatsapp');
+  if (readyPage) {
+    try { window.sessionStorage.removeItem(CASE_DRAFT_KEY); } catch (_error) {}
+  }
+
   const form = document.getElementById('case-create-form');
   if (!form) return;
+
+  const ignoredNames = new Set(['csrf_token', 'website', 'submit']);
+  const fields = Array.from(form.querySelectorAll('[name]'))
+    .filter(field => !ignoredNames.has(field.name) && field.type !== 'password' && field.type !== 'file');
+
+  const saveDraft = () => {
+    const draft = {};
+    fields.forEach(field => {
+      draft[field.name] = field.type === 'checkbox'
+        ? { type: 'checkbox', checked: field.checked }
+        : { type: 'value', value: field.value };
+    });
+    try { window.sessionStorage.setItem(CASE_DRAFT_KEY, JSON.stringify(draft)); } catch (_error) {}
+  };
+
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(CASE_DRAFT_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      fields.forEach(field => {
+        const entry = saved[field.name];
+        if (!entry || typeof entry !== 'object') return;
+        if (field.type === 'checkbox' && entry.type === 'checkbox') {
+          field.checked = Boolean(entry.checked);
+        } else if (entry.type === 'value' && typeof entry.value === 'string') {
+          field.value = entry.value;
+        }
+      });
+    }
+  } catch (_error) {}
+
+  form.addEventListener('input', saveDraft);
+  form.addEventListener('change', saveDraft);
   form.addEventListener('submit', () => {
+    saveDraft();
     const button = form.querySelector('button[type="submit"]');
     if (button) button.disabled = true;
   }, { once: true });
