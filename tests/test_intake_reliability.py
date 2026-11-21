@@ -116,3 +116,17 @@ def test_browser_draft_is_tab_scoped_and_never_stores_csrf_or_honeypot():
     assert "window.sessionStorage.getItem(CASE_DRAFT_KEY" in source
     assert "'csrf_token', 'website', 'submit'" in source
     assert "window.sessionStorage.removeItem(CASE_DRAFT_KEY)" in source
+
+
+def test_csrf_recovery_retries_the_original_submit_once_with_fresh_token():
+    app_source = (ROOT / 'app.py').read_text(encoding='utf-8')
+    handler_start = app_source.index('def handle_csrf_error')
+    handler_end = app_source.index('def handle_unexpected_error', handler_start)
+    assert 'csrf_retry=True' in app_source[handler_start:handler_end]
+    template = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
+    assert "data-csrf-retry=" in template
+    js = (ROOT / 'static/js/app.js').read_text(encoding='utf-8')
+    assert "CSRF_RETRY_KEY = 'yakuza.case-csrf-retry.v1'" in js
+    assert "form.dataset.csrfRetry === '1'" in js
+    assert "window.sessionStorage.getItem(CSRF_RETRY_KEY) !== '1'" in js
+    assert "form.requestSubmit()" in js
