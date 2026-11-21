@@ -13,13 +13,24 @@
 
 ## Local checks completed
 
-- `pytest -q`: **54 passed**.
+- `pytest -q`: **59 passed**.
 - Python compilation: `app.py`, `security_utils.py`, `whatsapp_utils.py`.
 - JavaScript syntax: `node --check static/js/app.js`.
-- Jinja parsing: all 10 templates.
+- Jinja parsing: all 11 templates (including the standalone 500 page).
 - YAML parsing: `render.yaml`.
 - ZIP integrity and SHA-256 checked after packaging.
 
 ## Verification boundary
 
 This environment does not have Flask, Flask-WTF, Flask-SQLAlchemy or Flask-Limiter installed, and package-index access is unavailable. Therefore a full Flask test-client POST, live Render PostgreSQL transaction and real WhatsApp app launch/send could not be executed here. Perform one dummy submission after deployment before accepting real customer records.
+
+
+## Additional deployment diagnostic checks
+
+- Root `.python-version` pins Python 3.12.8.
+- Intake POST receipt/completion logs correlate request and response without logging form contents.
+- Unhandled exceptions produce a private Render traceback and a safe support-reference error page.
+- `/health/intake` reports database reachability, WhatsApp-number format validity, and Python version without exposing secrets.
+- SQLAlchemy suppresses bound parameter values in database exception messages.
+
+The uploaded Render logs show only GET requests and no POST or 500 traceback, so the exact production exception remains unconfirmed until a failing POST is captured after deployment.

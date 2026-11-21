@@ -102,3 +102,8 @@ Render Free web services sleep after 15 minutes without inbound traffic; the fir
 Collect only information necessary to assess the report. Never request passwords, one-time codes, recovery keys, session cookies, payment credentials or unnecessary identity documents. Publish a privacy notice describing purpose, lawful basis, retention, contact details and data-subject rights before accepting real customer records. Restrict exports and protect backups.
 
 See `TWO_STEP_WHATSAPP_FLOW.md`, `FINAL_DEPLOYMENT_DIAGNOSTICS.md`, `SECURITY_ARCHITECTURE.md`, `TECHNICAL_REVIEW.md`, and `UI_UX_REVIEW.md`.
+
+
+### Intake diagnostics
+
+Open `/health/intake` to check that the configured database is reachable and `WHATSAPP_NUMBER` has a valid international number shape. It does not verify that the number is registered on WhatsApp. On a failed submission, use the support reference displayed on the error page and search Render logs for `intake_request_received`, `intake_request_completed`, or `unhandled_request_failure`.

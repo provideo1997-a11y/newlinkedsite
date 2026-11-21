@@ -76,7 +76,7 @@ def test_lang_query_redirect_only_applies_to_get_requests():
 
 def test_static_asset_cache_key_points_to_two_step_flow():
     base = (ROOT / 'templates/base.html').read_text(encoding='utf-8')
-    assert "v='two-step-case-handoff-20261121a'" in base
+    assert "v='render-post-diagnostics-20261121b'" in base
 
 
 def test_case_reference_token_has_no_arithmetic_challenge_and_is_signed():

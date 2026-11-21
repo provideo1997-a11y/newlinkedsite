@@ -1,7 +1,7 @@
 import os, secrets, csv, io, re, uuid
 from datetime import datetime, timezone, timedelta
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response, g
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect, CSRFError, generate_csrf
@@ -11,6 +11,8 @@ from wtforms import StringField, EmailField, SelectField, TextAreaField, Passwor
 from wtforms.validators import DataRequired, Email, Length, Optional
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import HTTPException
+import sys
 from sqlalchemy import desc
 from sqlalchemy.exc import IntegrityError
 from time import perf_counter
@@ -642,6 +644,11 @@ def inject():
     lang=session.get('lang','en'); return {'t':tr,'lang':lang,'languages':LANGS,'direction':LANGS.get(lang,LANGS['en'])['dir']}
 @app.before_request
 def language_and_security():
+    # Correlate each request without logging submitted personal information or signed URL tokens.
+    g.support_reference = uuid.uuid4().hex[:12].upper()
+    g.request_started = perf_counter()
+    if request.path == '/contact' and request.method == 'POST':
+        app.logger.info('intake_request_received support_ref=%s content_length=%s', g.support_reference, request.content_length)
     if request.method == 'GET' and request.args.get('lang') in LANGS:
         session['lang']=request.args['lang']
         return redirect(request.path)
@@ -660,6 +667,9 @@ def security_headers(resp):
     resp.headers['X-Content-Type-Options']='nosniff'; resp.headers['X-Frame-Options']='DENY'; resp.headers.setdefault('Referrer-Policy','strict-origin-when-cross-origin'); resp.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
     resp.headers['Content-Security-Policy']="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
     if app.config['SESSION_COOKIE_SECURE']: resp.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
+    if request.path == '/contact' and request.method == 'POST':
+        elapsed = int((perf_counter() - getattr(g, 'request_started', perf_counter())) * 1000)
+        app.logger.info('intake_request_completed support_ref=%s status=%s elapsed_ms=%s', getattr(g, 'support_reference', 'unknown'), resp.status_code, elapsed)
     return resp
 @app.get('/')
 def home(): return render_template('index.html')
@@ -731,7 +741,7 @@ def contact():
             return redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)
     except Exception as exc:
         db.session.rollback()
-        app.logger.error('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
+        app.logger.exception('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
         return render_form_error(tr('case_save_failed'), 503, code='DATABASE_UNAVAILABLE')
 
     if form.evidence_url.data:
@@ -802,8 +812,8 @@ def contact():
                 return redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)
         except Exception as recovery_error:
             db.session.rollback()
-            app.logger.error('intake_race_recovery_failed support_ref=%s case_ref=%s error_type=%s', support_reference, submitted_ref, type(recovery_error).__name__)
-        app.logger.error('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
+            app.logger.exception('intake_race_recovery_failed support_ref=%s case_ref=%s error_type=%s', support_reference, submitted_ref, type(recovery_error).__name__)
+        app.logger.exception('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
         return render_form_error(tr('case_save_failed'), 503, code='CASE_CONFLICT_OR_DATABASE_ERROR')
     except Exception as exc:
         db.session.rollback()
@@ -816,7 +826,7 @@ def contact():
                 return redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)
         except Exception:
             db.session.rollback()
-        app.logger.error('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
+        app.logger.exception('intake_failure support_ref=%s case_ref=%s stage=%s error_type=%s elapsed_ms=%d', support_reference, submitted_ref, stage, type(exc).__name__, int((perf_counter() - started) * 1000))
         return render_form_error(tr('case_save_failed'), 503, code='CASE_SAVE_FAILED')
 
 
@@ -865,6 +875,25 @@ def handle_csrf_error(error):
     form.csrf_token.data = generate_csrf()
     flash(tr('intake_csrf_error'), 'error')
     return render_template('contact.html', form=form), 400
+
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    # Do not convert expected 4xx/redirect HTTP exceptions into 500 responses.
+    if isinstance(error, HTTPException):
+        return error
+    support_reference = getattr(g, 'support_reference', uuid.uuid4().hex[:12].upper())
+    # Full traceback goes to Render logs; no request body or user-submitted fields are logged.
+    app.logger.error(
+        'unhandled_request_failure support_ref=%s method=%s endpoint=%s',
+        support_reference, request.method, request.endpoint or 'unmatched',
+        exc_info=(type(error), error, error.__traceback__)
+    )
+    response = app.make_response(render_template('server_error.html', support_reference=support_reference))
+    response.status_code = 500
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    response.headers['Referrer-Policy'] = 'no-referrer'
+    return response
+
 
 @app.get('/privacy')
 def privacy(): return render_template('privacy.html')
@@ -924,6 +953,27 @@ def admin_logout(): session.clear(); return redirect(url_for('home'))
 @app.get('/health')
 def health(): return {'status':'ok','service':'yakuza'}, 200
 
+@app.get('/health/intake')
+def intake_health():
+    """Safe diagnostic for DB reachability, WhatsApp number shape and runtime version."""
+    database_status = 'unavailable'
+    try:
+        from sqlalchemy import text as sql_text
+        db.session.execute(sql_text('SELECT 1'))
+        database_status = 'reachable'
+    except Exception as exc:
+        db.session.rollback()
+        app.logger.exception('intake_health_database_failed error_type=%s', type(exc).__name__)
+    whatsapp_status = 'configured' if normalize_whatsapp_number(os.environ.get('WHATSAPP_NUMBER', '')) else 'invalid_or_missing'
+    healthy = database_status == 'reachable' and whatsapp_status == 'configured'
+    return {
+        'status': 'ok' if healthy else 'degraded',
+        'database': database_status,
+        'whatsapp_number': whatsapp_status,
+        'python': sys.version.split()[0],
+    }, (200 if healthy else 503)
+
+
 @app.get('/health/db')
 def database_health():
     try:
@@ -932,7 +982,7 @@ def database_health():
         return {'status': 'ok', 'database': 'reachable'}, 200
     except Exception as exc:
         db.session.rollback()
-        app.logger.error('database_health_check_failed error_type=%s', type(exc).__name__)
+        app.logger.exception('database_health_check_failed error_type=%s', type(exc).__name__)
         return {'status': 'error', 'database': 'unavailable'}, 503
 with app.app_context():
     db.create_all()

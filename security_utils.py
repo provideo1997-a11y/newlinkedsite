@@ -60,7 +60,7 @@ def sqlalchemy_engine_options(database_uri: str) -> dict:
     until the web worker is killed. SQLite receives a bounded lock wait too.
     """
     uri = (database_uri or "").strip().lower()
-    options = {"pool_pre_ping": True, "pool_recycle": 300}
+    options = {"pool_pre_ping": True, "pool_recycle": 300, "hide_parameters": True}
     if uri.startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
         options.update({
             "pool_size": 2,

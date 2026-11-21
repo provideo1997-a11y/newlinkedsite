@@ -21,4 +21,15 @@ The intake path uses ordinary browser form submission and Post/Redirect/Get. The
 
 ## Deployment notes
 
-Keep `SECRET_KEY` stable across deploys and all workers. Keep `DATABASE_URL` pointing at the persistent database and `WHATSAPP_NUMBER` in international digits-only format. Check Render Logs for `intake_failure` entries; logs include a support reference, processing stage and exception type, not the visitor's personal content.
+Keep `SECRET_KEY` stable across deploys and all workers. Keep `DATABASE_URL` pointing at the persistent database and `WHATSAPP_NUMBER` in international digits-only format. Check Render Logs for `intake_request_received`, `intake_request_completed`, `intake_failure`, or `unhandled_request_failure`. Handled intake exceptions now include a private traceback and support reference; the request logs include only method, endpoint, content length and status, never form contents. SQLAlchemy hides bound parameters in SQL errors.
+
+
+## November 21 deployment-log findings and diagnostic repair
+
+The supplied Render log for commit `a63468d99dc900153b1f0fd3d2294fdd71e71dda` shows a successful build and Gunicorn startup, then only `GET /`, `GET /contact`, CSS and JavaScript requests. It contains **no `POST /contact`**, no `/case/ready/` request, and no Python traceback. It therefore does not identify the reported 500.
+
+This release adds: `intake_request_received` and `intake_request_completed` logs (no submitted fields are logged), full exception tracebacks with support references, a generic safe 500 page, `/health/intake` (database reachability + WhatsApp number syntax + Python version), and SQLAlchemy `hide_parameters=True` to keep bound customer data out of SQL error logs.
+
+The root `.python-version` pins Python 3.12.8 because the supplied deployment used Render's default Python 3.14.10 even though the repository had a `runtime.txt` and Blueprint pin. Render's current version-selection guidance prioritizes the service `PYTHON_VERSION` environment variable and then `.python-version`; add/confirm `PYTHON_VERSION=3.12.8` in the existing service's Environment page if it is missing.
+
+After deploying, test exactly one dummy case, then inspect Render logs for `intake_request_received`. If it is absent, the browser did not send the POST. If it appears, use its `support_ref` and the adjacent traceback/failure stage to locate the exception. Do not send live customer data during diagnostics.

@@ -15,3 +15,6 @@ Build command: `pip install -r requirements.txt`
 Start command: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
 
 Root directory: blank when `app.py` is at repository root.
+
+
+The root `.python-version` now pins Python 3.12.8. In the existing Render service, also verify `PYTHON_VERSION=3.12.8` under Environment; the log previously showed `(default) 3.14.10`. After deploy, check `/health/intake`. When testing, use a dummy case and confirm Render logs show `intake_request_received` followed by `intake_request_completed`; if it fails, share the support reference and traceback (never share secrets or real complaint contents).
