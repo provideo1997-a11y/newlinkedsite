@@ -63,7 +63,7 @@ Environment variables:
 | `ADMIN_PASSWORD` | Unique 16+ character password when creating/resetting the admin. |
 | `COOKIE_SECURE` | `1` on HTTPS Render; `0` only for local HTTP development. |
 | `ADMIN_URL_PREFIX` | `/private-inbox` |
-| `WHATSAPP_NUMBER` | International digits only, e.g. `491234567890` (documentation placeholder); no `+`, spaces, `00`, or domestic trunk zero. |
+| `WHATSAPP_NUMBER` | Defaults to `4917642484892`; override only if you use a different WhatsApp destination. International digits only, no `+`, spaces, `00`, or domestic trunk zero. |
 | `DATABASE_URL` | Reachable persistent PostgreSQL URL. Do not use local SQLite for permanent live records. |
 | `INTAKE_RATE_LIMIT` | `30 per hour` by default. |
 | `RATELIMIT_STORAGE_URI` | `memory://` only for a single-instance demo; use shared Redis-compatible storage when scaling. |

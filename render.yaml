@@ -19,7 +19,7 @@ services:
       - key: ADMIN_URL_PREFIX
         value: /private-inbox
       - key: WHATSAPP_NUMBER
-        sync: false
+        value: 4917642484892
       - key: DATABASE_URL
         sync: false
       - key: INTAKE_RATE_LIMIT
