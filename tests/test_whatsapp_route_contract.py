@@ -27,7 +27,7 @@ def test_second_page_loads_saved_case_and_contains_server_generated_whatsapp_lin
     route = source[start:end]
     assert '_case_handoff_serializer.loads(token, max_age=24 * 60 * 60)' in route
     assert 'Inquiry.query.filter_by(case_ref=case_ref).first_or_404()' in route
-    assert "build_case_whatsapp_url(os.environ.get('WHATSAPP_NUMBER', ''), item)" in route
+    assert "build_case_whatsapp_url(os.environ.get('WHATSAPP_NUMBER', '4917642484892'), item)" in route
     assert "render_template('case_ready.html', item=item, whatsapp_url=whatsapp_url)" in route
 
 

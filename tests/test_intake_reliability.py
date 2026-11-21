@@ -23,13 +23,14 @@ def test_intake_has_no_extra_contact_choice_or_custom_form_token():
     source = (ROOT / 'app.py').read_text(encoding='utf-8')
     form = source[source.index('class InquiryForm'):source.index('class LoginForm')]
     assert 'contact_method=' not in form
-    assert 'authorization=' not in form
+    assert 'authorization=' in form
     assert 'case_token' not in form
     assert 'human_answer' not in form
     template = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
     assert template.count('type="submit"') == 1
     assert 'form.hidden_tag()' in template
     assert 'contact-choice' not in template
+    assert template.count('name="authorization"') == 1
     assert template.count('name="whatsapp_consent"') == 1
 
 
@@ -68,7 +69,7 @@ def test_whatsapp_number_is_validated_before_any_case_is_committed():
     start = source.index('def contact():')
     end = source.index("@app.get('/case/ready/<token>')", start)
     route = source[start:end]
-    assert "normalize_whatsapp_number(os.environ.get('WHATSAPP_NUMBER', ''))" in route
+    assert "normalize_whatsapp_number(os.environ.get('WHATSAPP_NUMBER', '4917642484892'))" in route
     assert route.index('normalize_whatsapp_number(') < route.index('db.session.commit()')
 
 
