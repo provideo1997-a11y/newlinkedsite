@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from time import perf_counter
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from security_utils import normalize_database_url, merge_locale_translations, csv_safe, sqlalchemy_engine_options, normalize_whatsapp_number, ensure_unique_case_reference_index
-from whatsapp_utils import build_case_whatsapp_url, build_case_whatsapp_message
+from whatsapp_utils import build_case_whatsapp_url
 
 app = Flask(__name__, instance_relative_config=True)
 # Render terminates TLS and forwards one trusted proxy hop. Never trust arbitrary client-supplied chains.
@@ -45,7 +45,7 @@ app.config.update(
     # Flask-WTF / itsdangerous expects an integer number of seconds here.
     WTF_CSRF_TIME_LIMIT=12 * 60 * 60,
     MAX_CONTENT_LENGTH=64 * 1024,
-    PERMANENT_SESSION_LIFETIME=timedelta(minutes=30),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
     SESSION_REFRESH_EACH_REQUEST=True,
 )
 db=SQLAlchemy(app); csrf=CSRFProtect(app)
@@ -89,8 +89,8 @@ for _code, _copy in FORM_COPY.items():
 
 # One single submit action: validate, save the case, then redirect directly to WhatsApp.
 WHATSAPP_INTAKE_COPY = {
-    'en': {'step_next':'CREATE CASE', 'create_secure_case':'Create secure case', 'secure_note':'Your case is saved first. The next page lets you review the reference and open WhatsApp with the complete report.', 'case_ready_title':'Your secure case is saved', 'case_ready_intro':'Your information has been saved in the case desk. Use the button below to open WhatsApp with the complete report already prepared.', 'case_ready_reference':'Case reference', 'case_ready_status':'Saved securely', 'case_ready_send':'Open WhatsApp message', 'case_ready_note':'WhatsApp opens with the full case details and review report already filled in. Review the draft, then press Send in WhatsApp.', 'case_ready_preview':'Review the full WhatsApp message', 'whatsapp_configuration_error':'WhatsApp is not configured correctly. Your case has not been created. Please contact the site administrator.'},
-    'fr': {'step_next':'CRÉER LE DOSSIER', 'create_secure_case':'Créer le dossier sécurisé', 'secure_note':'Votre dossier est d’abord enregistré. La page suivante affiche sa référence et permet d’ouvrir WhatsApp avec le rapport complet.', 'case_ready_title':'Votre dossier sécurisé est enregistré', 'case_ready_intro':'Vos informations ont été enregistrées. Utilisez le bouton ci-dessous pour ouvrir WhatsApp avec le rapport complet déjà préparé.', 'case_ready_reference':'Référence du dossier', 'case_ready_status':'Enregistré en toute sécurité', 'case_ready_send':'Ouvrir le message WhatsApp', 'case_ready_note':'WhatsApp s’ouvre avec les détails et le rapport complet déjà remplis. Vérifiez le brouillon puis appuyez sur Envoyer dans WhatsApp.', 'case_ready_preview':'Voir le message WhatsApp complet', 'whatsapp_configuration_error':'WhatsApp n’est pas correctement configuré. Votre dossier n’a pas été créé. Contactez l’administrateur du site.'},
+    'en': {'step_next':'CREATE CASE', 'create_secure_case':'Create secure case', 'secure_note':'Your case is saved first. The next page lets you review the reference and open WhatsApp with the complete report.', 'case_ready_title':'Your secure case is saved', 'case_ready_intro':'Your information has been saved in the case desk. Use the button below to open WhatsApp with the complete report already prepared.', 'case_ready_reference':'Case reference', 'case_ready_status':'Saved securely', 'case_ready_send':'Send to WhatsApp', 'case_ready_note':'WhatsApp will open with the full case details and review report filled in. Check the message and press Send inside WhatsApp.', 'whatsapp_configuration_error':'WhatsApp is not configured correctly. Your case has not been created. Please contact the site administrator.'},
+    'fr': {'step_next':'CRÉER LE DOSSIER', 'create_secure_case':'Créer le dossier sécurisé', 'secure_note':'Votre dossier est d’abord enregistré. La page suivante affiche sa référence et permet d’ouvrir WhatsApp avec le rapport complet.', 'case_ready_title':'Votre dossier sécurisé est enregistré', 'case_ready_intro':'Vos informations ont été enregistrées. Utilisez le bouton ci-dessous pour ouvrir WhatsApp avec le rapport complet déjà préparé.', 'case_ready_reference':'Référence du dossier', 'case_ready_status':'Enregistré en toute sécurité', 'case_ready_send':'Envoyer sur WhatsApp', 'case_ready_note':'WhatsApp s’ouvrira avec les détails et le rapport complet. Vérifiez le message puis appuyez sur Envoyer dans WhatsApp.', 'whatsapp_configuration_error':'WhatsApp n’est pas correctement configuré. Votre dossier n’a pas été créé. Contactez l’administrateur du site.'},
     'ar': {'step_next':'إنشاء الملف', 'create_secure_case':'إنشاء ملف آمن', 'secure_note':'يتم حفظ ملفك أولاً. تعرض الصفحة التالية رقم الملف وتتيح فتح واتساب مع التقرير الكامل.', 'case_ready_title':'تم حفظ ملفك الآمن', 'case_ready_intro':'تم حفظ معلوماتك في النظام. استخدم الزر أدناه لفتح واتساب مع التقرير الكامل المُعد مسبقاً.', 'case_ready_reference':'رقم الملف', 'case_ready_status':'تم الحفظ بأمان', 'case_ready_send':'إرسال عبر واتساب', 'case_ready_note':'سيفتح واتساب مع جميع تفاصيل الملف والتقرير. راجع الرسالة ثم اضغط إرسال داخل واتساب.', 'whatsapp_configuration_error':'واتساب غير مُهيأ بشكل صحيح. لم يتم إنشاء ملفك. يرجى التواصل مع مسؤول الموقع.'},
     'ar-tn': {'step_next':'سجّل الملف', 'create_secure_case':'سجّل ملف آمن', 'secure_note':'أول حاجة نسجّلو الملف. الصفحة الثانية توريك رقم الملف وتفتحلك واتساب برسالة فيها التقرير الكل.', 'case_ready_title':'الملف الآمن متاعك تسجّل', 'case_ready_intro':'معلوماتك تسجّلت في النظام. اضغط على الزر لتفتح واتساب برسالة محضّرة فيها التقرير والتفاصيل الكل.', 'case_ready_reference':'رقم الملف', 'case_ready_status':'تسجّل بأمان', 'case_ready_send':'ابعث عبر واتساب', 'case_ready_note':'واتساب يتحلّ والرسالة فيها تفاصيل الملف والتقرير. راجعها وبعد اضغط إرسال من داخل واتساب.', 'whatsapp_configuration_error':'واتساب موش مهيّأ بطريقة صحيحة. الملف متاعك ما تسجّلش. اتصل بمسؤول الموقع.'},
     'es': {'step_next':'CREAR CASO', 'create_secure_case':'Crear caso seguro', 'secure_note':'Primero se guarda tu caso. La página siguiente muestra la referencia y permite abrir WhatsApp con el informe completo.', 'case_ready_title':'Tu caso seguro está guardado', 'case_ready_intro':'Tu información se ha guardado. Usa el botón siguiente para abrir WhatsApp con el informe completo preparado.', 'case_ready_reference':'Referencia del caso', 'case_ready_status':'Guardado de forma segura', 'case_ready_send':'Enviar por WhatsApp', 'case_ready_note':'WhatsApp se abrirá con todos los detalles y el informe. Revisa el mensaje y pulsa Enviar dentro de WhatsApp.', 'whatsapp_configuration_error':'WhatsApp no está configurado correctamente. No se ha creado el caso. Contacta con el administrador del sitio.'},
@@ -537,17 +537,17 @@ for _locale_catalog in LANGS.values():
 
 # Server-rendered intake errors; no client-side challenge/retry loop.
 INTAKE_ERROR_COPY = {
-    'en': {'intake_form_error':'Please check the highlighted fields and try again.', 'intake_csrf_error':'Your details are still here. We refreshed the form security and are continuing your submission.'},
-    'fr': {'intake_form_error':'Vérifiez les champs signalés puis réessayez.', 'intake_csrf_error':'Vos informations sont toujours là. La sécurité du formulaire a été actualisée et votre demande reprend.'},
-    'ar': {'intake_form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.', 'intake_csrf_error':'بياناتك ما زالت موجودة. تم تحديث حماية النموذج وسيتم استكمال طلبك.'},
-    'ar-tn': {'intake_form_error':'راجع الخانات المعلّمة وعاود المحاولة.', 'intake_csrf_error':'معلوماتك مازالت موجودة. حدّثنا حماية الفورم وتوّا نكمّلوا الطلب.'},
-    'es': {'intake_form_error':'Revisa los campos señalados y vuelve a intentarlo.', 'intake_csrf_error':'Tus datos siguen aquí. Hemos actualizado la seguridad del formulario y continuamos con el envío.'},
-    'de': {'intake_form_error':'Bitte prüfe die markierten Felder und versuche es erneut.', 'intake_csrf_error':'Deine Angaben sind noch da. Wir haben den Formularschutz erneuert und setzen deine Übermittlung fort.'},
-    'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':"I tuoi dati sono ancora qui. Abbiamo aggiornato la sicurezza del modulo e procediamo con l'invio."},
-    'pt': {'intake_form_error':'Verifique os campos assinalados e tente novamente.', 'intake_csrf_error':'Os seus dados continuam aqui. Atualizámos a segurança do formulário e vamos continuar o envio.'},
-    'tr': {'intake_form_error':'Lütfen işaretli alanları kontrol edip tekrar deneyin.', 'intake_csrf_error':'Bilgileriniz burada. Form güvenliğini yeniledik ve gönderiminize devam ediyoruz.'},
-    'zh': {'intake_form_error':'请检查标记的字段后重试。', 'intake_csrf_error':'你的资料仍在此处。表单安全已刷新，正在继续提交。'},
-    'ja': {'intake_form_error':'強調表示された項目を確認して再試行してください。', 'intake_csrf_error':'入力内容は保持されています。フォームの安全性を更新し、送信を続けています。'},
+    'en': {'intake_form_error':'Please check the highlighted fields and try again.', 'intake_csrf_error':'Your form session expired. Your entries have been kept. Please press Create secure case again.'},
+    'fr': {'intake_form_error':'Vérifiez les champs signalés puis réessayez.', 'intake_csrf_error':'Votre session a expiré. Vos réponses ont été conservées. Cliquez à nouveau sur Créer le dossier sécurisé.'},
+    'ar': {'intake_form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.', 'intake_csrf_error':'انتهت جلسة النموذج وتم الاحتفاظ ببياناتك. اضغط إنشاء الملف الآمن مرة أخرى.'},
+    'ar-tn': {'intake_form_error':'راجع الخانات المعلّمة وعاود المحاولة.', 'intake_csrf_error':'وفات جلسة الفورم أما معلوماتك بقات محفوظة. اضغط سجّل الملف الآمن من جديد.'},
+    'es': {'intake_form_error':'Revisa los campos señalados y vuelve a intentarlo.', 'intake_csrf_error':'La sesión del formulario caducó. Conservamos tus datos. Pulsa de nuevo Crear caso seguro.'},
+    'de': {'intake_form_error':'Bitte prüfe die markierten Felder und versuche es erneut.', 'intake_csrf_error':'Deine Formularsitzung ist abgelaufen. Deine Eingaben bleiben erhalten. Klicke erneut auf Sicheren Fall erstellen.'},
+    'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':'La sessione del modulo è scaduta. I tuoi dati sono stati conservati. Premi di nuovo Crea caso sicuro.'},
+    'pt': {'intake_form_error':'Verifique os campos assinalados e tente novamente.', 'intake_csrf_error':'A sessão do formulário expirou. Os seus dados foram mantidos. Clique novamente em Criar caso seguro.'},
+    'tr': {'intake_form_error':'Lütfen işaretli alanları kontrol edip tekrar deneyin.', 'intake_csrf_error':'Form oturumunuzun süresi doldu. Bilgileriniz korundu. Güvenli dosya oluştur düğmesine tekrar basın.'},
+    'zh': {'intake_form_error':'请检查标记的字段后重试。', 'intake_csrf_error':'表单会话已过期，您填写的信息已保留。请再次点击创建安全案件。'},
+    'ja': {'intake_form_error':'強調表示された項目を確認して再試行してください。', 'intake_csrf_error':'フォームの有効期限が切れました。入力内容は保持されています。もう一度「安全なケースを作成」を押してください。'},
 }
 for _locale, _copy in INTAKE_ERROR_COPY.items():
     LANGS[_locale].update(_copy)
@@ -758,8 +758,7 @@ def case_ready(token):
     whatsapp_url = build_case_whatsapp_url(os.environ.get('WHATSAPP_NUMBER', '4917642484892'), item)
     if not whatsapp_url:
         abort(503)
-    whatsapp_message = build_case_whatsapp_message(item)
-    return render_template('case_ready.html', item=item, whatsapp_url=whatsapp_url, whatsapp_message=whatsapp_message)
+    return render_template('case_ready.html', item=item, whatsapp_url=whatsapp_url)
 
 
 @app.errorhandler(429)
@@ -777,14 +776,11 @@ def handle_csrf_error(error):
             return render_template('admin_login.html', form=LoginForm()), 400
         return render_template('index.html'), 400
 
-    # Keep every submitted field, but never echo the expired/invalid CSRF token.
-    # With that one field removed, Flask-WTF generates a fresh token for this page.
-    preserved_form = request.form.copy() if request.method == 'POST' else None
-    if preserved_form is not None:
-        preserved_form.pop('csrf_token', None)
-    form = InquiryForm(formdata=preserved_form)
-    flash(tr('intake_csrf_error'), 'info')
-    return render_template('contact.html', form=form, csrf_retry=True), 400
+    # Preserve submitted fields. Flask-WTF generates a fresh CSRF token
+    # when the form is rendered again.
+    form = InquiryForm(formdata=request.form if request.method == 'POST' else None)
+    flash(tr('intake_csrf_error'), 'error')
+    return render_template('contact.html', form=form), 400
 
 
 @app.errorhandler(Exception)
