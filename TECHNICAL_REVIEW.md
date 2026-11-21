@@ -1,38 +1,38 @@
 # Technical review — YAKUZA Private Case Desk
 
-## Delivered in this build
-- Flask public website and structured case intake.
-- Multilingual public site and intake, including Arabic RTL and Tunisian Arabic.
-- Admin dashboard, individual case report, status updates, and protected CSV export.
-- Dashboard, case detail, receipt, and risk-triage interface translations for all bundled locales.
-- Admin language choice is retained across successful login. Eleven admin locales are initialized safely; four additional admin locales use English fallback on untranslated public-site pages.
-- Configurable intake rate limit; default raised from 5/hour to 30/hour.
-- CSRF, server-side validation, honeypot, arithmetic challenge, request-size limit, secure cookie options, security headers, and admin session checks.
-- WhatsApp number normalization for `0049...`, `+49...`, and digits-only international formats.
-- Single-button WhatsApp submission requires explicit consent, commits the full case first, then navigates to a prefilled message with the complete case and generated triage report; the message text is visible in the click-to-chat URL. The visitor must press Send in WhatsApp.
-- CSV formula-injection neutralization.
-- Accurate dashboard totals beyond the latest 250 displayed records.
-- PostgreSQL URL normalization to the installed psycopg 3 driver, and Render deployment configuration.
+## Current implementation
+
+- Flask public website, structured case intake and private case-management dashboard.
+- Flask/Jinja templates, vanilla JavaScript and responsive CSS; no additional frontend runtime or CDN.
+- Multilingual public and admin UI, including Arabic RTL and Tunisian Arabic.
+- Admin dashboard, individual case report, status changes, protected CSV export, search and status filters.
+- CSRF protection, server-side form validation, honeypot, rate limiting, request-size limit, secure cookie options, security headers and admin session checks.
+- PostgreSQL URL normalization to psycopg 3; bounded database connection, pool, lock and statement waits.
+- Additive legacy database migration and unique case-reference index for retry safety.
+- WhatsApp international-number normalization and full saved-case message generation.
+
+## Case submission architecture
+
+The intake does not use an AJAX submission handler. It uses a standard HTML POST and Post/Redirect/Get:
+
+1. GET `/contact` creates a signed per-form case reference.
+2. POST `/contact` is validated by Flask-WTF CSRF, WTForms, signed case-reference verification, consent checks and WhatsApp destination validation.
+3. The case and advisory triage report are inserted and committed to the database.
+4. The server redirects with HTTP 303 to `/case/ready/<signed-token>`. The hand-off token is signed, contains only the case reference and expires after 24 hours.
+5. The second page loads the saved record and exposes exactly one WhatsApp click-to-chat link containing the full prepared message.
+6. The visitor reviews and presses Send in WhatsApp. The site cannot send through a visitor's personal WhatsApp account or confirm delivery without the WhatsApp Business Platform and an appropriate integration.
+
+CSRF expiry re-renders the same form, preserves submitted fields and refreshes the hidden Flask-WTF token. The signed case reference is retained when still authentic. The visible arithmetic challenge and its retry failure mode have been removed; bot resistance uses CSRF, the honeypot and server-side rate limiting.
 
 ## Important limitations
-- The uploaded project ZIP was inspected and modified. The remote GitHub repository was not changed; authenticated write access was not available in this session.
-- No live Render deployment was triggered.
-- No production penetration test, independent code audit, or live WhatsApp delivery test was performed.
-- Free Render hosting cannot provide permanent uptime or durable case storage. Free Postgres expires after 30 days; local filesystem data is ephemeral. See `RENDER_FREE_LIMITS.md`.
-- `memory://` rate limiting is process-local and resets on restart. The public intake endpoint has a configurable 30/hour IP limit, but the app-wide 50/hour default can also apply. This is acceptable for a one-instance demo only.
-- Admin MFA, per-action audit logging, email verification, attachment quarantine/scanning, and formal retention automation remain production hardening work.
-- The intake path now uses a signed per-form idempotency reference, a unique database constraint, and recovery lookup for concurrent duplicate submissions.
 
-## Test status
-Static syntax/structure and ZIP integrity checks should be run before release. A real deployment must also complete the manual end-to-end checklist in `FREE_HOSTING_AND_DOMAIN_GUIDE.md` and `SECURITY_ARCHITECTURE.md`.
+- This source ZIP was created from the latest uploaded YAKUZA archive. The remote GitHub repository was not modified and Render was not deployed from this session.
+- The current build container did not have Flask / Flask-WTF / Flask-SQLAlchemy installed and could not reach the package index. Full Flask test-client submission and live PostgreSQL integration were therefore not run here.
+- No production penetration test, independent code audit, or real WhatsApp app delivery test was performed.
+- Render Free cannot provide permanent uptime or durable case storage. Free PostgreSQL expires after 30 days; local files are ephemeral. See `RENDER_FREE_LIMITS.md`.
+- `memory://` rate limiting is process-local and resets on restart. Use shared storage when scaling.
+- Admin MFA, per-action append-only audit history, email verification, private file quarantine/scanning and formal retention automation remain additional production hardening work.
 
+## Automated checks in this release
 
-## UI/UX and accessibility review (v9)
-
-The v9 interface work is documented in `UI_UX_REVIEW.md`. The existing dark charcoal/lime visual identity and Flask/Jinja plus vanilla JavaScript architecture were retained. The dashboard now supports client-side search and status filtering over the 250 most recent rendered cases, with the existing CSV route retained for full export. Case reports support reference copying and browser printing.
-
-Accessibility work includes skip navigation, semantic main/nav landmarks, current-page nav state, focus-visible rings, localized screen-reader labels, a progressively-enhanced loader, native form validation, and reduced-motion/print rules. These changes were source- and template-tested. They were not certified by an independent WCAG audit or a live assistive-technology test.
-
-
-## Final submission reliability repair
-The intake form has one action only. The browser sends a same-origin JSON request and refuses background redirects; after a successful commit it validates the returned `wa.me` URL and navigates the same tab. The no-JavaScript path receives a normal 303 after commit. PostgreSQL and SQLite waits are bounded; signed idempotency tokens prevent duplicate cases after retries; `/health/db` and support-reference logs help distinguish database failures from browser/platform failures. The visitor still presses Send in WhatsApp. See `FINAL_DEPLOYMENT_DIAGNOSTICS.md` and `BUILD_VERIFICATION.md`.
+The release uses pytest tests for utility behavior, token helpers, source contracts, translations, CSV safety, duplicate-index migration and the two-step form/hand-off contract. Python compilation, JavaScript syntax and Jinja parse checks are also run during packaging. These checks do not substitute for a live Render smoke test with a dummy case.

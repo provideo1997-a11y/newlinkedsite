@@ -5,7 +5,7 @@
   <span class="section-kicker">{{ t('case_kicker') }} / 01</span>
   <h1>{{ t('case_title') }}</h1>
   <p>{{ t('case_intro') }}</p>
-  <div class="intake-trust"><span>● {{ t('secure_note') }}</span><span>● {{ t('human_label') }}</span></div>
+  <div class="intake-trust"><span>● {{ t('secure_note') }}</span></div>
 </section>
 <section class="contact-layout case-layout">
   <aside class="contact-aside case-aside">
@@ -19,7 +19,7 @@
     </div>
   </aside>
   <div class="form-panel case-form-panel">
-    <form method="post" action="{{ url_for('contact') }}" id="case-intake-form" data-slow-message="{{ t('submission_slow') }}" data-saving-message="{{ t('intake_saving') }}" data-waiting-message="{{ t('intake_waiting') }}" data-timeout-message="{{ t('intake_timeout') }}" data-network-message="{{ t('intake_network_error') }}" data-saved-message="{{ t('intake_saved') }}" data-invalid-response-message="{{ t('intake_invalid_response') }}">
+    <form method="post" action="{{ url_for('contact') }}" id="case-create-form">
       {{ form.hidden_tag() }}
       <div class="honeypot">{{ form.website.label }}{{ form.website() }}</div>
       <div class="form-section-title"><span>01</span><div><b>{{ t('step_identity') }}</b><small>{{ t('required_note') }}</small></div></div>
@@ -39,12 +39,10 @@
       <label>{{ t('evidence_label') }} <small>({{ t('optional') }})</small>{{ form.evidence_url(class_='field',placeholder='https://…',inputmode='url') }}<small class="field-hint">{{ t('evidence_hint') }}</small>{% for e in form.evidence_url.errors %}<small class="field-error">{{ e }}</small>{% endfor %}</label>
       <label>{{ t('story_label') }} <em>*</em>{{ form.message(class_='field textarea',placeholder=t('story_hint'),rows='5',maxlength='3000',minlength='25',required=true,id='case-story',**{'aria-describedby': 'story-count-hint'}) }}<small class="field-hint" id="story-count-hint"><span id="story-count">0</span> / 3000 {{ t('story_count') }}</small>{% for e in form.message.errors %}<small class="field-error">{{ e }}</small>{% endfor %}</label>
       <div class="form-section-title"><span>03</span><div><b>{{ t('step_next') }}</b></div></div>
-      <label class="consent-line whatsapp-consent-line"><input type="checkbox" id="whatsapp-consent" name="whatsapp_consent" value="yes" required {% if form.whatsapp_consent.data == 'yes' %}checked{% endif %}> <span>{{ t('whatsapp_consent_label') }}</span></label>
-      <div class="human-check"><label for="human_answer"><b>{{ t('human_label') }}:</b> <span id="human-question">{{ human_question }}</span> = ?</label>{{ form.human_answer(class_='field',placeholder=t('human_hint'),inputmode='numeric',autocomplete='off',required=true) }}{% for e in form.human_answer.errors %}<small class="field-error">{{ e }}</small>{% endfor %}</div>
-      <label class="consent-line"><input type="checkbox" name="authorization" value="yes" required> <span>{{ t('consent_text') }}</span></label>
+      <label class="consent-line whatsapp-consent-line"><input type="checkbox" id="whatsapp-consent" name="whatsapp_consent" value="yes" required {% if form.whatsapp_consent.data == 'yes' %}checked{% endif %}> <span>{{ t('whatsapp_consent_label') }}</span></label>{% for e in form.whatsapp_consent.errors %}<small class="field-error">{{ e }}</small>{% endfor %}
+      <label class="consent-line"><input type="checkbox" name="authorization" value="yes" required {% if form.authorization.data == 'yes' %}checked{% endif %}> <span>{{ t('consent_text') }}</span></label>{% for e in form.authorization.errors %}<small class="field-error">{{ e }}</small>{% endfor %}
       <p class="form-note">{{ t('privacy_note') }}</p>
-      <button class="button button-primary case-submit" type="submit" data-submitting-label="{{ t('submitting_request') }}">{{ t('send_to_whatsapp') }} <span aria-hidden="true">↗</span></button>
-      <p class="submit-footnote" id="case-submit-status" role="status" aria-live="polite"></p>
+      <button class="button button-primary case-submit" type="submit">{{ t('create_secure_case') }} <span aria-hidden="true">↗</span></button>
     </form>
   </div>
 </section>

@@ -1,12 +1,9 @@
-# Final change log — WhatsApp case submission recovery
+# Final change log
 
-## Confirmed defect fixed
-The route's own expired/invalid case-token handler returned replacement case token data but did not follow the response contract expected by the browser. The browser therefore failed to update the hidden case token / visible check and the same stale submission repeated.
-
-## Changes
-- Added `CASE_TOKEN_REFRESHED` JSON response contract with refreshed CSRF + case token and arithmetic question.
-- Client now handles both `CSRF_TOKEN_REFRESHED` and `CASE_TOKEN_REFRESHED`, updates form values, clears/focuses a replacement challenge, and never forces a reload.
-- Added a 24-hour renewal grace for authentic one-hour tokens; a refreshed token retains the original case reference and arithmetic challenge.
-- Bad signatures / old signing secrets / tokens outside the grace period receive a genuinely new challenge and reference, correctly exposed in the form.
-- Bumped the JavaScript cache key.
-- Added regression tests for route-level JSON contract, in-place DOM update, authentic expired-token renewal, and old-secret recovery.
+- Replaced the brittle one-page AJAX/security-question workflow with a two-page server-rendered flow: create case, save and commit, then open the saved-case page.
+- Removed the repeated arithmetic challenge and all stale labels for the retired one-page contact-choice UI. CSRF protection remains enabled.
+- CSRF failures re-render the form with entries preserved and a renewed hidden token; there is no user-visible math question to repeat.
+- Fixed blank optional fields so an omitted phone, incident date, account handle or evidence URL cannot raise an AttributeError during case creation.
+- Case creation is idempotent by a signed per-form case reference and a database uniqueness constraint/index.
+- The second page contains exactly one WhatsApp action, built from the committed database record and complete advisory report.
+- The visitor must review the WhatsApp draft and press Send inside WhatsApp; delivery is not confirmed to the website.

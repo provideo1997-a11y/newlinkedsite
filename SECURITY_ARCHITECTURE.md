@@ -6,7 +6,7 @@
 
 ```text
 Public browser (untrusted)
-  | HTTPS / form POST / CSRF token / arithmetic challenge
+  | HTTPS / form POST / CSRF token / signed form reference
   v
 Render edge TLS termination
   | one trusted proxy hop (ProxyFix: x_for=1, x_proto=1)
@@ -88,7 +88,7 @@ Likelihood is qualitative for an internet-facing small intake service. Impact me
 - **Passkeys/WebAuthn + step-up auth for CSV export:** strongest practical improvement against stolen passwords; adds identity-provider complexity.
 - **Append-only audit chain:** each audit record stores the previous event hash and its own canonical event hash; periodically anchor a signed digest outside the database. This detects later alteration but does not stop a privileged attacker from suppressing events before anchoring.
 - **Object storage quarantine for future attachments:** upload to a private bucket, random object key, strict size/type allowlist, malware scanning in an isolated worker, and short-lived signed download URLs. Do not accept direct file uploads until this pipeline exists.
-- **Risk-adaptive rate limiting:** increase friction on bursts, repeated failed arithmetic checks, invalid CSRF, and repeated login failures. Avoid aggressive fingerprinting that creates privacy or false-positive problems.
+- **Risk-adaptive rate limiting:** increase friction on bursts, invalid CSRF and repeated login failures. Avoid aggressive fingerprinting that creates privacy or false-positive problems.
 - **Formal invariants / property-based tests:** verify that every accepted case has a unique reference, unauthenticated clients cannot reach admin routes, no redirect occurs before database commit, and CSV cells cannot become spreadsheet formulas.
 - **Moving-target defense:** rotate admin URL prefix only as supplemental friction; it must never replace authentication, MFA, and monitoring.
 
@@ -138,9 +138,9 @@ Containment:
 
 Run after each deployment:
 1. `/health` returns 200.
-2. Public intake rejects missing CSRF, invalid arithmetic answer, missing authorization, invalid email, invalid evidence URL, and honeypot completion.
+2. Public intake rejects missing CSRF, missing authorization, missing WhatsApp consent, invalid email, invalid evidence URL, and honeypot completion; server-side rate limiting constrains repeated submissions.
 3. A valid dummy report creates one case with one unique reference.
-4. The visitor activates the form’s sole **Send to WhatsApp** button. The same-origin request must receive a successful response only after the server commits the case; the browser then navigates to the validated full prefilled WhatsApp message. The no-JavaScript path receives a 303 only after commit. The visitor must still press Send manually inside WhatsApp.
+4. The visitor submits the normal HTML form using **Create secure case**. Flask validates CSRF, the signed per-form reference, consent, form fields, and configured WhatsApp destination. The server commits the case and then returns a 303 to a signed case-ready page. That second page has exactly one **Send to WhatsApp** link, which opens the full prefilled message after an explicit click. The visitor must still press Send manually inside WhatsApp.
 5. `0049...`, `+49...`, and `49...` produce the same `wa.me` number; malformed numbers do not redirect.
 6. WhatsApp draft is generated only after the database commit, requires explicit sharing consent, and contains the case reference, submitted fields, full description, and triage report. The visitor must press Send manually.
 7. Anonymous requests to every admin route are redirected to login.
@@ -152,4 +152,6 @@ Run after each deployment:
 
 
 ## Final submission reliability controls
-The application has one public case submission action. The browser POST uses JSON and refuses automatic redirect following; it only navigates after validating the successful server response and the `https://wa.me/<digits>` destination. The no-JavaScript path still redirects only after commit. Signed per-form references make retry idempotent, unique constraints handle simultaneous duplicate requests, PostgreSQL connection/pool/statement/lock waits and SQLite lock waits are bounded, `/health/db` checks database reachability, and support-reference logs identify the failing stage without including submitted PII. The complete message URL is treated as sensitive; responses are no-store and use `Referrer-Policy: no-referrer`. A normal `wa.me` link cannot press Send or confirm delivery.
+The public intake uses a conventional server-rendered HTML POST and Post/Redirect/Get flow. The first page creates and commits the case; only after a successful commit does the server issue a signed, time-limited hand-off token and redirect to the separate case-ready page. That second page contains exactly one WhatsApp link built from the saved record. The visitor explicitly clicks it, reviews the prefilled message, and presses Send inside WhatsApp.
+
+The fragile client-side arithmetic challenge and AJAX retry loop have been removed. Intake protection relies on Flask-WTF CSRF validation, a signed per-form case reference for idempotent retries, a honeypot field, server-side input validation, and rate limiting. CSRF expiry re-renders the same form with submitted values preserved and a fresh hidden CSRF token; no user-visible test is repeated. PostgreSQL connection/pool/statement/lock waits and SQLite lock waits remain bounded. `/health/db` checks database reachability. Support-reference logs identify the failing stage without logging submitted personal information. Case-ready responses are non-cacheable and use `Referrer-Policy: no-referrer`. A normal `wa.me` link cannot press Send or confirm delivery.

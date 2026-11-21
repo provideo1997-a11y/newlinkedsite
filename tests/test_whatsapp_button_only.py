@@ -4,57 +4,48 @@ import ast
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_contact_form_has_one_whatsapp_submit_and_no_delivery_alternatives():
-    form = (ROOT / "templates" / "contact.html").read_text(encoding="utf-8")
+def test_first_page_has_one_create_case_submit_and_no_whatsapp_button():
+    form = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
     assert form.count('type="submit"') == 1
-    assert "t('send_to_whatsapp')" in form
-    assert "contact-choice" not in form
-    assert "contact_method" not in form
-    assert "private_title" not in form
-    assert "whatsapp_title" not in form
-    assert "whatsapp-consent" in form and "required" in form
-    assert "submitted.html" not in form
+    assert 't(\'create_secure_case\')' in form
+    assert 't(\'send_to_whatsapp\')' not in form
+    assert 'contact-choice' not in form
+    assert 'name="contact_method"' not in form
+    assert 'whatsapp-consent' in form and 'required' in form
 
 
-def test_successful_submission_redirects_directly_to_whatsapp_after_commit():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    start = source.index("def contact():")
-    end = source.index("@app.get('/privacy')", start)
+def test_second_page_has_exactly_one_whatsapp_action():
+    page = (ROOT / 'templates/case_ready.html').read_text(encoding='utf-8')
+    assert page.count('id="case-ready-whatsapp"') == 1
+    assert page.count('<a ') == 1
+    assert 't(\'case_ready_send\')' in page
+
+
+def test_success_is_post_redirect_get_to_signed_saved_case_page():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
+    start = source.index('def contact():')
+    end = source.index("@app.get('/case/ready/<token>')", start)
     route = source[start:end]
-    assert "db.session.flush()" in route
-    assert route.index("db.session.commit()") < route.index("response = redirect(whatsapp_url, code=303)")
-    assert "build_case_whatsapp_url(configured_whatsapp, item)" in route
-    assert "render_template(\n            'submitted.html'" not in route
-    assert "contact_method='whatsapp'" in route
-    assert "response.headers['Referrer-Policy'] = 'no-referrer'" in route
+    assert 'db.session.commit()' in route
+    assert "redirect(url_for('case_ready', token=issue_case_handoff_token(submitted_ref)), code=303)" in route
+    assert 'whatsapp_success' not in source
 
 
-def test_no_receipt_template_or_extra_whatsapp_button_remains():
-    assert not (ROOT / "templates" / "submitted.html").exists()
-    assert "whatsapp-open-link" not in "\n".join(
-        p.read_text(encoding="utf-8") for p in (ROOT / "templates").glob("*.html")
-    )
-
-
-def test_all_locales_have_single_button_label_and_configuration_error():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
+def test_all_locales_have_both_create_and_send_labels():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
     tree = ast.parse(source)
-    node = next(n.value for n in tree.body if isinstance(n, ast.Assign)
-                and any(isinstance(t, ast.Name) and t.id == "WHATSAPP_INTAKE_COPY" for t in n.targets))
+    node = next(n.value for n in tree.body if isinstance(n, ast.Assign) and any(
+        isinstance(t, ast.Name) and t.id == 'WHATSAPP_INTAKE_COPY' for t in n.targets
+    ))
     labels = ast.literal_eval(node)
-    assert set(labels) == {"en", "fr", "ar", "ar-tn", "es", "de", "it", "pt", "tr", "zh", "ja"}
+    assert set(labels) == {'en','fr','ar','ar-tn','es','de','it','pt','tr','zh','ja'}
     for locale, values in labels.items():
-        assert values["send_to_whatsapp"]
-        assert values["whatsapp_configuration_error"]
-        assert values["secure_note"]
+        for key in ('create_secure_case','case_ready_title','case_ready_send','case_ready_note'):
+            assert values.get(key), f'{locale} missing {key}'
 
 
-def test_server_requires_whatsapp_consent_and_checks_destination_before_commit():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    start = source.index("def contact():")
-    end = source.index("@app.get('/privacy')", start)
-    route = source[start:end]
-    assert "if form.whatsapp_consent.data != 'yes':" in route
-    assert route.index("build_case_whatsapp_url(configured_whatsapp, item)") < route.index("db.session.commit()")
-    assert "db.session.rollback()" in route
-    assert "WHATSAPP_NUMBER" in route
+def test_fragile_ajax_submission_is_removed_from_contact_javascript():
+    js = (ROOT / 'static/js/app.js').read_text(encoding='utf-8')
+    assert 'Reliable single-button intake' not in js
+    assert 'fetch(form.action' not in js
+    assert 'case-intake-form' not in js

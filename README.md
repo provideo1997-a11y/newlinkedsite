@@ -1,6 +1,6 @@
 # YAKUZA — Private Case Desk
 
-A Flask-based digital-risk intake and private case-management portal. This is software for collecting and organizing reports; it is not a managed investigation service, platform recovery provider, or guarantee of account recovery.
+A Flask-based digital-risk intake and private case-management portal. It collects and organizes reports; it is not a managed investigation service, platform recovery provider, or guarantee of account recovery.
 
 ## Local development
 
@@ -9,91 +9,96 @@ python -m venv .venv
 # Windows: .venv\\Scripts\\activate
 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-# Copy .env.example to .env and set local values before running
+# Copy .env.example to .env and set local values
 python app.py
 ```
 
 Do not commit `.env`, credentials, customer data, SQLite databases, uploads, or backups.
 
-## One-button WhatsApp case intake and reliability controls
+## Case intake — two distinct pages
 
-The public form has exactly one submit action: **Send to WhatsApp**. There is no contact-method selection, separate receipt page, second WhatsApp button, or alternative delivery path.
+The public workflow deliberately uses ordinary HTML forms and Post/Redirect/Get. The intake page does not intercept the submit with JavaScript or use an AJAX/CSRF retry loop.
 
-The single action follows this order:
+1. **Page 1 — Create secure case.** The visitor fills the form and gives explicit authorization and WhatsApp data-sharing consent. Flask-WTF validates the CSRF token; the route validates a signed per-form reference used for duplicate-safe retries.
+2. **Save first.** The server validates `WHATSAPP_NUMBER`, prepares the complete case and advisory triage report, commits the database transaction, then responds with HTTP 303 to the second page. Retried submissions with the same signed case reference reuse the already-saved case and do not create duplicates.
+3. **Page 2 — Case saved.** A signed, expiring hand-off token (case reference only; no personal data in the token) loads the saved case. The page displays the reference and a concise summary.
+4. **Send to WhatsApp.** The second page has exactly one WhatsApp action. Clicking it opens `https://wa.me/<international-number>?text=<complete-report>` with requester details, incident details, original description, risk indicators and the generated advisory triage report already filled in.
+5. **Visitor presses Send.** WhatsApp click-to-chat does not send automatically and does not notify the website that a message was delivered. The visitor must review and press Send inside WhatsApp.
 
-1. Browser posts the form and CSRF token to the same-origin `/contact` endpoint.
-2. Server validates the form, signed per-form case token, authorization, explicit WhatsApp data-sharing consent, human challenge, and configured destination number.
-3. Server creates the case and triage report, builds the WhatsApp draft, flushes and commits the database transaction.
-4. Only after successful commit does the server return the prefilled WhatsApp destination. JavaScript validates that the destination is `https://wa.me/<digits>` and opens it in the same tab. Without JavaScript, the normal form receives a `303` redirect after commit.
+There is no hidden background redirect and no client-side submission fetch. The visible arithmetic challenge has been removed because it repeatedly blocked otherwise valid submissions. Intake protection uses Flask-WTF CSRF, server-side validation, a honeypot, rate limiting and a signed per-form case reference. If the CSRF session expires, the server re-renders the same form, preserves submitted values, renews the hidden CSRF token and retains the case reference when its signature remains valid.
 
-The request has bounded PostgreSQL connection, pool, lock, and statement waits; SQLite lock waits are also bounded. A 120-second browser timeout covers Render Free cold-start behavior. Each form has a signed, time-limited case reference, and startup ensures the database has a unique index for that reference (including older tables where `create_all` would not add a new constraint). Retry of the same form after a network timeout reuses the original committed case instead of creating a duplicate. If old data already contains duplicate non-null case references, startup stops with an explicit migration error so the records can be reconciled safely. A `support_reference` is returned for server-side failures, and application logs record the failing stage without logging submitted PII.
+The `/case/ready/<token>` page token is signed and expires after 24 hours. The route fetches the saved record server-side and builds the WhatsApp URL from the saved record; it does not accept a user-supplied WhatsApp destination.
 
-The browser fetch is configured not to follow redirects in the background. A successful JSON response is required before the page navigates to WhatsApp. An unexpected redirect or non-JSON response becomes a visible error instead of disappearing inside a fetch request.
+## Reliability and security
 
-**WhatsApp limitation:** a `wa.me` click-to-chat link can open a chat with prefilled text, but cannot press Send from the visitor's account or confirm delivery. The visitor must review and press Send inside WhatsApp. The message contains the case details and triage report, so the form requires explicit consent. The submitted case is already saved before WhatsApp opens.
+- Signed per-form case references plus a unique database index provide duplicate-safe retries, including simultaneous submissions.
+- PostgreSQL connection, pool, lock and statement waits are bounded; SQLite lock waits are bounded too.
+- Legacy databases receive an additive unique-index migration. Startup stops with a clear message if duplicate non-null legacy case references prevent that index.
+- Explicit WhatsApp-sharing consent is required before case creation.
+- The WhatsApp destination is validated and normalized to international digits-only form. Keep the real number in Render Environment, not in source code.
+- The full report is generated from the saved database record. User text is treated as untrusted data and clearly delimited in the message.
+- CSRF protection, server-side validation, a honeypot, rate limiting, request-size limit, secure cookie options, security headers, admin session checks and protected CSV export remain enabled.
+- CSV formula-like values are neutralized before export.
+- Application logs record failure stage, exception type and a support reference without logging submitted PII.
 
-## Deployment on Render
+## Render deployment
 
-- Root Directory: blank when `app.py` is in the repository root.
-- Runtime: Python 3.12.
-- Build Command: `pip install -r requirements.txt`
-- Start Command: `gunicorn --workers 1 --threads 4 --timeout 60 app:app`
-- Basic health path: `/health`
-- Database diagnostic path: `/health/db` (returns 200 only when the database answers `SELECT 1`).
+When `app.py` is at repository root:
 
-Required Render environment variables:
+| Setting | Value |
+|---|---|
+| Root Directory | Blank |
+| Runtime | Python |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `gunicorn --workers 1 --threads 4 --timeout 60 app:app` |
+| Health path | `/health` |
+| Database health path | `/health/db` |
+
+Environment variables:
 
 | Key | Value / rule |
 |---|---|
-| `SECRET_KEY` | Long random secret; keep stable across deploys and rotate if exposed. |
-| `ADMIN_USERNAME` | Your private admin username. |
-| `ADMIN_PASSWORD` | Unique password of at least 16 characters when first creating/resetting admin. |
-| `COOKIE_SECURE` | `1` |
+| `SECRET_KEY` | Long random secret; keep stable across deploys and all workers. Do not rotate it during a normal deploy. |
+| `ADMIN_USERNAME` | Private administrator username. |
+| `ADMIN_PASSWORD` | Unique 16+ character password when creating/resetting the admin. |
+| `COOKIE_SECURE` | `1` on HTTPS Render; `0` only for local HTTP development. |
 | `ADMIN_URL_PREFIX` | `/private-inbox` |
-| `WHATSAPP_NUMBER` | International digits only: country code followed by subscriber number, without `+`, spaces, `00`, or a domestic trunk zero. Keep the real number in Render Environment only. |
-| `DATABASE_URL` | A reachable PostgreSQL connection URL. Do not rely on SQLite for real case records. |
-| `INTAKE_RATE_LIMIT` | `30 per hour` by default; tune deliberately. |
-| `RATELIMIT_STORAGE_URI` | `memory://` only for the single-instance demo; use shared Redis-compatible storage when scaling. |
+| `WHATSAPP_NUMBER` | International digits only, e.g. `491234567890` (documentation placeholder); no `+`, spaces, `00`, or domestic trunk zero. |
+| `DATABASE_URL` | Reachable persistent PostgreSQL URL. Do not use local SQLite for permanent live records. |
+| `INTAKE_RATE_LIMIT` | `30 per hour` by default. |
+| `RATELIMIT_STORAGE_URI` | `memory://` only for a single-instance demo; use shared Redis-compatible storage when scaling. |
 
-The application converts `postgres://` and `postgresql://` URLs to the installed psycopg 3 driver. Make sure the database is active, the database URL is current, and the web service and database can communicate in Render. Never commit a real production connection string.
+The application converts Render `postgres://` and `postgresql://` connection URLs to psycopg 3. Do not commit a real production connection string.
 
-### Submission troubleshooting
+### Database diagnostics
 
-After deployment, open `https://YOUR-SERVICE.onrender.com/health/db`:
+Open `https://YOUR-SERVICE.onrender.com/health/db` after deployment:
 
-- `200` with `{"status":"ok","database":"reachable"}` means the application can execute a trivial database query.
-- `503` with `{"status":"error","database":"unavailable"}` means the database is not reachable or is not accepting queries. Check Render's database status, expiration, region, URL, and logs.
+- HTTP 200 with `{"status":"ok","database":"reachable"}` means the application can execute `SELECT 1`.
+- HTTP 503 with `{"status":"error","database":"unavailable"}` means the database is not reachable or is not accepting queries.
 
-When a form submission fails, the page shows a support reference. In Render Logs, search for `intake_failure` and that support reference. The `stage` field identifies whether it failed during the duplicate lookup, database flush, WhatsApp message creation, or database commit. These logs intentionally omit the submitted case contents.
+If a submission fails, keep the displayed support reference and search Render application logs for `intake_failure` plus that reference. The `stage` value identifies duplicate lookup, database flush, WhatsApp message construction or commit. Logs intentionally omit case contents.
 
-If there is no matching application log, inspect the Render service/deploy logs and confirm the newest commit is deployed. A Render Free web service may be asleep or starting; see `RENDER_FREE_LIMITS.md`.
+## Render Free limitations
 
-## Render persistence and availability limits
-
-Render Free web services sleep after 15 minutes without inbound traffic, and the next request can take about a minute to wake. Their local filesystem is ephemeral, so SQLite data is not durable. Render Free PostgreSQL expires after 30 days and has no backups. Do not use this setup for permanent customer case storage. Use an active managed PostgreSQL database with backups and a paid always-on web service before collecting real reports. See `RENDER_FREE_LIMITS.md`.
+Render Free web services sleep after 15 minutes without inbound traffic; the first request can take about a minute to wake. The local filesystem is ephemeral, so SQLite data is not durable. Free PostgreSQL expires after 30 days and does not include backups. Do not use free-tier storage for permanent customer case records. Use a persistent managed PostgreSQL database with backups and an always-on service before accepting real reports. See `RENDER_FREE_LIMITS.md`.
 
 ## Admin
 
-- Login: `/private-inbox/login` (the legacy `/private-inbox/logina` route remains supported).
-- Dashboard: `/private-inbox`
-- Case details, status changes and CSV export require an authenticated admin session and CSRF protection.
+- Login: `/private-inbox/login` (legacy `/private-inbox/logina` remains supported).
+- Dashboard: `/private-inbox`.
+- Case details, status updates and CSV export require an authenticated admin session and CSRF protection.
 - An obscure admin URL is not an authentication control.
 
-## Application behavior
+## Application behavior and language support
 
-- Default intake limit is 30 submissions per hour per client IP; the general app limit is also applied.
-- Case risk indicators are advisory and are not fraud determinations.
-- The admin dashboard search/filter covers the 250 newest rows loaded on the page; CSV export covers all stored rows.
-- Admin/dashboard translations are bundled for English, French, Arabic, Tunisian Arabic, Spanish, German, Italian, Portuguese, Turkish, Simplified Chinese and Japanese. Untranslated public intake copy in the four additional admin locales may fall back to English.
+- Default intake limit is 30 submissions per hour per client IP; general app limits also apply.
+- Risk indicators are advisory and are not fraud determinations.
+- Dashboard search/filter applies to the 250 most recent rows loaded; CSV export covers all stored rows.
+- Admin/dashboard and primary intake flow are bundled for English, French, Arabic, Tunisian Arabic, Spanish, German, Italian, Portuguese, Turkish, Simplified Chinese and Japanese.
 
 ## Data and privacy
 
-Collect only information needed to assess the report. Never request passwords, one-time codes, recovery keys, session cookies, payment credentials, or unnecessary identity documents. Publish a privacy notice describing purpose, lawful basis, retention, contact details and data-subject rights before accepting real customer records. Restrict exports and protect backups.
+Collect only information necessary to assess the report. Never request passwords, one-time codes, recovery keys, session cookies, payment credentials or unnecessary identity documents. Publish a privacy notice describing purpose, lawful basis, retention, contact details and data-subject rights before accepting real customer records. Restrict exports and protect backups.
 
-See `SECURITY_ARCHITECTURE.md`, `TECHNICAL_REVIEW.md`, `UI_UX_REVIEW.md`, and `FINAL_DEPLOYMENT_DIAGNOSTICS.md`.
-
-## CSRF recovery and page reload fix
-
-The intake script does not call `window.location.reload()`. When Flask-WTF rejects a stale CSRF token, the server returns a newly signed CSRF token as JSON. The browser updates the hidden field and retries once if the signed case token remains valid. If the case token expired, the new arithmetic challenge is displayed in place for the visitor to solve. The form posts to the canonical contact route and language canonicalization is GET-only. `SECRET_KEY` must remain stable across all workers and running instances.
-
-See `FINAL_DEPLOYMENT_DIAGNOSTICS.md` for a deployment smoke test.
+See `TWO_STEP_WHATSAPP_FLOW.md`, `FINAL_DEPLOYMENT_DIAGNOSTICS.md`, `SECURITY_ARCHITECTURE.md`, `TECHNICAL_REVIEW.md`, and `UI_UX_REVIEW.md`.

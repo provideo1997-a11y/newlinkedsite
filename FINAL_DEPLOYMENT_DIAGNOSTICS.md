@@ -1,33 +1,24 @@
-# Final deployment diagnostics — secure case submission
+# Final deployment diagnostics
 
-## Expected one-button path
-1. Visitor completes the form and arithmetic check.
-2. Visitor clicks **Send to WhatsApp** once.
-3. The browser posts JSON to the same-origin `/contact` endpoint.
-4. Flask validates the form, commits the case, then returns a WhatsApp destination.
-5. The browser navigates to `https://wa.me/<number>?text=...`; the visitor presses Send inside WhatsApp.
+The intake path uses ordinary browser form submission and Post/Redirect/Get. There is no AJAX handler, visible arithmetic challenge or background WhatsApp redirect.
 
-## What the token-renewal defect was
-There were two different token error paths. Flask-WTF CSRF failures used `CSRF_TOKEN_REFRESHED`, which the client knew how to process. But an expired/invalid YAKUZA case token was handled inside `/contact` and returned only a message + token fields without a recovery code or refreshed CSRF token. The JavaScript did not apply those fields. That meant the next click reused stale hidden data and could show the same message again.
+## Expected route sequence
 
-This repair unifies the two paths. It returns `CASE_TOKEN_REFRESHED`, refreshes the CSRF token, updates the case token and question in the DOM, and focuses the answer field when a genuinely new calculation is required. For a still-authentic token between one and 24 hours old, it re-signs the original challenge and retries the same request automatically.
+1. `GET /contact` returns a form containing a Flask-WTF CSRF token and a signed per-form idempotency reference.
+2. The visitor completes the fields, checks account authorization and WhatsApp data-sharing consent, then clicks **Create secure case**.
+3. `POST /contact` validates CSRF, WTForms fields, the signed per-form reference, honeypot, consent and the configured WhatsApp destination.
+4. The server saves the case and triage report in the database, commits, then returns `303 Location: /case/ready/<signed-token>`.
+5. The case-ready page validates the 24-hour signed token, fetches the saved case and displays exactly one **Send to WhatsApp** link.
+6. Clicking that link opens `https://wa.me/<number>?text=<complete-report>`. The visitor reviews the message and presses Send inside WhatsApp.
 
-## Test after deployment
-- Use a fresh private/incognito browser tab.
-- Open the contact page and complete all required fields, consents and arithmetic check.
-- Click **Send to WhatsApp** once.
-- Expected: the case is saved, then WhatsApp opens with the full message.
-- If a new security check appears, verify the displayed arithmetic question changes and the answer field is focused; solve it and click the same button again.
-- Check Render Logs for `intake_committed`, `intake_reused`, or `intake_failure`. These events do not log submitted names, email addresses or incident descriptions.
+## If the form shows an error
 
-## Environment invariants
-- `SECRET_KEY` must remain stable across deployments and be identical across all running instances. Do not regenerate it during deploys.
-- `WHATSAPP_NUMBER` must be digits-only international format (for the configured German number, begin with `49`, not `0049` or `+`).
-- `DATABASE_URL` must point to the intended persistent database.
-- `/health/db` only confirms database reachability; it does not validate CSRF/session signing.
+- Ordinary field-validation errors re-render the form and retain the submitted values. Blank optional phone, incident-date, account-handle and evidence fields are normalized to empty strings before database insertion, avoiding `None.strip()` crashes.
+- CSRF expiry re-renders the form, preserves the submitted values and supplies a fresh hidden CSRF token. The signed per-form case reference is reused when authentic, so retrying after a lost response cannot create a duplicate case.
+- The arithmetic challenge was removed to eliminate the repeated visible test that previously blocked submissions. Anti-abuse controls are the CSRF token, signed form reference, hidden honeypot, request-size limit and server-side rate limiting.
+- Database or WhatsApp configuration failures are shown on the form with a support reference; the case is not intentionally redirected to WhatsApp unless it has been saved.
+- If the case committed but the redirect response was lost, re-submitting the same signed per-form reference reuses the existing record and returns the visitor to the case-ready page.
 
-## If the fresh check keeps reappearing
-A repeated new challenge after deployment strongly suggests inconsistent `SECRET_KEY` values between app instances, a secret being changed between GET and POST, or an old deployment/static asset still being served. Confirm all instances use the same exact Render `SECRET_KEY`, check the deployed commit SHA, and hard-refresh/clear the site's cached files once. Do not paste the secret into logs or chat.
+## Deployment notes
 
-## Limits of local verification
-Automated tests, helper logic, Python compilation, JavaScript syntax, and template parsing passed here. The real Render browser POST, PostgreSQL commit and WhatsApp launch must still be tested after deployment; this environment cannot access your live Render runtime.
+Keep `SECRET_KEY` stable across deploys and all workers. Keep `DATABASE_URL` pointing at the persistent database and `WHATSAPP_NUMBER` in international digits-only format. Check Render Logs for `intake_failure` entries; logs include a support reference, processing stage and exception type, not the visitor's personal content.

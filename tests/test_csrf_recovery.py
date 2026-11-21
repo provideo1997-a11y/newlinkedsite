@@ -1,155 +1,137 @@
 from pathlib import Path
+import ast
+import re
+import secrets
+import time
+from datetime import datetime, timezone
+
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_ajax_csrf_failure_refreshes_token_without_requesting_page_reload():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    start = source.index("@app.errorhandler(CSRFError)")
+def _token_helpers():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    names = {'issue_case_token', '_validate_case_token_payload', 'read_case_token', 'refresh_case_token'}
+    nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
+    serializer_node = next(node for node in tree.body if isinstance(node, ast.Assign) and any(
+        isinstance(target, ast.Name) and target.id == '_case_token_serializer' for target in node.targets
+    ))
+    namespace = {
+        'app': type('A', (), {'config': {'SECRET_KEY': 'stable-test-secret'}}),
+        '_case_token_serializer': URLSafeTimedSerializer('stable-test-secret', salt='yakuza-case-intake-v1'),
+        'URLSafeTimedSerializer': URLSafeTimedSerializer,
+        'BadSignature': BadSignature,
+        'SignatureExpired': SignatureExpired,
+        'datetime': datetime,
+        'timezone': timezone,
+        'secrets': secrets,
+        're': re,
+    }
+    exec(compile(ast.Module(body=[serializer_node, *nodes], type_ignores=[]), 'case_tokens', 'exec'), namespace)
+    return namespace
+
+
+def test_intake_no_longer_uses_ajax_or_arithmetic_challenge():
+    app = (ROOT / 'app.py').read_text(encoding='utf-8')
+    js = (ROOT / 'static/js/app.js').read_text(encoding='utf-8')
+    form = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
+    assert 'fetch(form.action' not in js
+    assert 'window.location.reload()' not in js
+    assert 'human_answer' not in app
+    assert 'human_question' not in app
+    assert 'human-check' not in form
+    assert 'human_answer' not in form
+    assert 'human-question' not in form
+
+
+def test_contact_csrf_handler_preserves_fields_and_issues_fresh_tokens():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
+    start = source.index('@app.errorhandler(CSRFError)')
     end = source.index("@app.get('/privacy')", start)
     handler = source[start:end]
-    assert "csrf_token = generate_csrf()" in handler
-    assert "'code': 'CSRF_TOKEN_REFRESHED'" in handler
-    assert "'csrf_token': csrf_token" in handler
-    assert "'case_token': case_token" in handler
-    assert "'retryable': retryable" in handler
-    assert "'reload': True" not in handler
+    assert 'InquiryForm(formdata=request.form' in handler
+    assert 'refresh_case_token(submitted_case_token)' in handler
+    assert 'form.case_token.data = case_token' in handler
+    assert 'form.csrf_token.data = generate_csrf()' in handler
+    assert "flash(tr('intake_csrf_error'), 'error')" in handler
+    assert 'human_answer' not in handler
+    assert 'human_question' not in handler
 
 
-def test_client_retries_one_csrf_refresh_and_never_calls_location_reload():
-    source = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
-    start = source.index("// Reliable single-button intake.")
-    end = source.index("// Admin list filtering", start)
-    js = source[start:end]
-    assert "payload.code === 'CSRF_TOKEN_REFRESHED'" in js
-    assert "applyRefreshedTokens(payload)" in js
-    assert "response = await sendRequest()" in js
-    assert "if (!payload.retryable)" in js
-    assert "window.location.reload()" not in source
-    assert "payload.reload" not in js
-    assert "window.location.assign(destination.href)" in js
+def test_contact_form_is_normal_html_post_and_keeps_one_create_button():
+    form = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
+    assert 'method="post"' in form
+    assert 'id="case-create-form"' in form
+    assert form.count('type="submit"') == 1
+    assert 'form.hidden_tag()' in form
+    assert 'case-intake-form' not in form
 
 
-def test_form_posts_to_canonical_contact_path_and_language_cleaner_only_redirects_get():
-    form = (ROOT / "templates/contact.html").read_text(encoding="utf-8")
-    app = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert "action=\"{{ url_for('contact') }}\"" in form
-    assert "if request.method == 'GET' and request.args.get('lang') in LANGS:" in app
+def test_lang_query_redirect_only_applies_to_get_requests():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
+    assert "if request.method == 'GET' and request.args.get('lang') in LANGS:" in source
 
 
-def test_js_asset_cache_key_changes_to_force_updated_csrf_recovery_script():
-    base = (ROOT / "templates/base.html").read_text(encoding="utf-8")
-    assert "v='case-token-recovery-20261121b'" in base
+def test_static_asset_cache_key_points_to_two_step_flow():
+    base = (ROOT / 'templates/base.html').read_text(encoding='utf-8')
+    assert "v='two-step-case-handoff-20261121a'" in base
 
 
-def test_route_level_expired_case_token_returns_refresh_code_csrf_token_and_new_question():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    start = source.index("def contact():")
-    end = source.index("def whatsapp_success(", start)
-    route = source[start:end]
-    assert "'code': 'CASE_TOKEN_REFRESHED'" in route
-    assert "'csrf_token': generate_csrf()" in route
-    assert "'case_token': form.case_token.data" in route
-    assert "'human_question': question" in route
-    assert "'retryable': False" in route
+def test_case_reference_token_has_no_arithmetic_challenge_and_is_signed():
+    ns = _token_helpers()
+    token = ns['issue_case_token']()
+    payload = ns['read_case_token'](token)
+    assert set(payload) == {'ref'}
+    assert re.fullmatch(r'YKZ-[0-9]{6}-[A-F0-9]{12}', payload['ref'])
 
 
-def test_client_handles_route_level_case_token_refresh_and_focuses_new_check():
-    source = (ROOT / "static/js/app.js").read_text(encoding="utf-8")
-    start = source.index("// Reliable single-button intake.")
-    end = source.index("// Admin list filtering", start)
-    js = source[start:end]
-    assert "payload.code === 'CASE_TOKEN_REFRESHED'" in js
-    assert "applyRefreshedTokens(payload)" in js
-    assert "answer.focus({ preventScroll: true })" in js
-    assert "answer.scrollIntoView" in js
-
-
-def test_expired_authentic_case_token_can_be_renewed_without_changing_answer():
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    start = source.index("def refresh_case_token(")
-    end = source.index("class Inquiry(", start)
-    helper = source[start:end]
-    assert "max_age=24 * 60 * 60" in helper
-    assert "'ref': payload['ref'], 'a': payload['a'], 'b': payload['b']" in helper
-    assert "return renewed, f\"{payload['a']} + {payload['b']}\", True" in helper
-
-
-def test_case_token_helpers_preserve_challenge_when_token_expires_but_signature_is_valid():
-    import ast
-    import random
-    import secrets
-    import time
-    import re
-    from datetime import datetime, timezone
-    from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
-
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    names = {"issue_case_token", "_validate_case_token_payload", "read_case_token", "refresh_case_token"}
-    funcs = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
-    assert {node.name for node in funcs} == names
-
-    secret = "stable-test-secret-which-is-long-enough"
-    namespace = {
-        "_case_token_serializer": URLSafeTimedSerializer(secret, salt="yakuza-case-intake-v1"),
-        "BadSignature": BadSignature,
-        "datetime": datetime,
-        "timezone": timezone,
-        "secrets": secrets,
-        "random": random,
-        "re": re,
-    }
-    exec(compile(ast.Module(body=funcs, type_ignores=[]), "app_case_token_helpers", "exec"), namespace)
+def test_expired_form_token_can_be_refreshed_without_changing_case_reference():
+    ns = _token_helpers()
 
     class OldTimestampSerializer(URLSafeTimedSerializer):
         def make_signer(self, salt=None):
             signer = super().make_signer(salt)
-            signer.get_timestamp = lambda: int(time.time()) - 2 * 60 * 60
+            signer.get_timestamp = lambda: int(time.time()) - 8 * 24 * 60 * 60
             return signer
 
-    old_serializer = OldTimestampSerializer(secret, salt="yakuza-case-intake-v1")
-    original_payload = {"ref": "YKZ-261121-ABCDEF123456", "a": 7, "b": 4}
-    expired_token = old_serializer.dumps(original_payload)
+    old = OldTimestampSerializer('stable-test-secret', salt='yakuza-case-intake-v1')
+    original_ref = 'YKZ-261121-ABCDEF123456'
+    expired = old.dumps({'ref': original_ref})
     try:
-        namespace["read_case_token"](expired_token)
+        ns['read_case_token'](expired)
     except SignatureExpired:
         pass
     else:
-        raise AssertionError("Test token should be outside the normal one-hour lifetime")
-
-    renewed_token, question, retryable = namespace["refresh_case_token"](expired_token)
-    assert retryable is True
-    assert question == "7 + 4"
-    assert namespace["read_case_token"](renewed_token) == original_payload
+        raise AssertionError('The normal form token lifetime should be bounded')
+    renewed, reusable = ns['refresh_case_token'](expired)
+    assert reusable is True
+    assert ns['read_case_token'](renewed) == {'ref': original_ref}
 
 
-def test_case_token_signed_by_old_secret_gets_a_new_visible_challenge():
-    import ast
-    import random
-    import secrets
-    import re
-    from datetime import datetime, timezone
-    from itsdangerous import URLSafeTimedSerializer, BadSignature
+def test_invalid_signed_token_is_replaced_not_trusted():
+    ns = _token_helpers()
+    renewed, reusable = ns['refresh_case_token']('tampered')
+    assert reusable is False
+    assert re.fullmatch(r'YKZ-[0-9]{6}-[A-F0-9]{12}', ns['read_case_token'](renewed)['ref'])
 
-    source = (ROOT / "app.py").read_text(encoding="utf-8")
+
+def test_handoff_token_is_signed_and_expires():
+    source = (ROOT / 'app.py').read_text(encoding='utf-8')
     tree = ast.parse(source)
-    names = {"issue_case_token", "_validate_case_token_payload", "read_case_token", "refresh_case_token"}
-    funcs = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names]
-    namespace = {
-        "_case_token_serializer": URLSafeTimedSerializer("new-test-secret", salt="yakuza-case-intake-v1"),
-        "BadSignature": BadSignature,
-        "datetime": datetime,
-        "timezone": timezone,
-        "secrets": secrets,
-        "random": random,
-        "re": re,
-    }
-    exec(compile(ast.Module(body=funcs, type_ignores=[]), "app_case_token_helpers", "exec"), namespace)
-    old_token = URLSafeTimedSerializer("old-test-secret", salt="yakuza-case-intake-v1").dumps(
-        {"ref": "YKZ-261121-ABCDEF123456", "a": 7, "b": 4}
-    )
-    new_token, question, retryable = namespace["refresh_case_token"](old_token)
-    assert retryable is False
-    assert question != "7 + 4" or namespace["read_case_token"](new_token)["ref"] != "YKZ-261121-ABCDEF123456"
-    assert namespace["read_case_token"](new_token)["ref"].startswith("YKZ-")
+    node = next(n for n in tree.body if isinstance(n, ast.Assign) and any(
+        isinstance(t, ast.Name) and t.id == '_case_handoff_serializer' for t in n.targets
+    ))
+    func = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'issue_case_handoff_token')
+    secret = 'handoff-test-secret'
+    ns = {'app': type('A', (), {'config': {'SECRET_KEY': secret}}), 'URLSafeTimedSerializer': URLSafeTimedSerializer}
+    exec(compile(ast.Module(body=[node, func], type_ignores=[]), 'handoff', 'exec'), ns)
+    token = ns['issue_case_handoff_token']('YKZ-261121-ABCDEF123456')
+    assert ns['_case_handoff_serializer'].loads(token, max_age=86400) == {'ref': 'YKZ-261121-ABCDEF123456'}
+    try:
+        ns['_case_handoff_serializer'].loads('not-a-token', max_age=86400)
+    except BadSignature:
+        pass
+    else:
+        raise AssertionError('Invalid handoff tokens must be rejected')

@@ -61,9 +61,8 @@ def test_case_report_has_copy_and_print_controls():
 
 def test_intake_keeps_native_validation_and_counter_description():
     contact = (PROJECT_ROOT / "templates" / "contact.html").read_text(encoding="utf-8")
-    assert 'id="case-intake-form" novalidate' not in contact
+    assert 'id="case-create-form"' in contact
     assert "type='date'" in contact
-    assert "data-submitting-label" in contact
     assert "**{'aria-describedby': 'story-count-hint'}" in contact
 
 
@@ -71,7 +70,6 @@ def test_client_scripts_cover_filter_copy_print_and_bfcache_restore():
     script = (PROJECT_ROOT / "static" / "js" / "app.js").read_text(encoding="utf-8")
     assert "case-search" in script and "case-status-filter" in script
     assert "data-copy-reference" in script and "print-report" in script
-    assert "pageshow" in script
     assert "document.documentElement.classList.add('js')" in script
 
 

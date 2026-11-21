@@ -1,23 +1,25 @@
-# Build verification — case-token recovery repair
+# Build verification
 
-## Root cause confirmed in the previous build
-The `/contact` route had its own JSON error helper for an expired/invalid signed case token. It returned a replacement `case_token` and `human_question`, but did not return a machine-readable recovery code or a fresh Flask-WTF `csrf_token`. The browser only applied refreshed values when it saw `CSRF_TOKEN_REFRESHED`, so it kept posting the stale hidden case token and did not update the arithmetic prompt. The user repeatedly saw the token-renewal message without a working next step.
+## Implemented and locally checked
 
-## Corrected behavior
-- Route-level recovery now returns `CASE_TOKEN_REFRESHED`, a fresh CSRF token, a new/current case token, the visible arithmetic question, and an explicit retryability flag.
-- Client code recognizes both CSRF and case-token recovery responses, updates the hidden fields and visible question, clears the old answer when a new challenge is required, and focuses the new answer field.
-- Authentic case tokens older than one hour but younger than 24 hours are re-signed while preserving the case reference and arithmetic challenge, allowing the original submission to continue or be retried without creating a duplicate.
-- Tokens with an invalid signature, a different signing secret, or an age beyond the grace window receive a genuinely new reference/challenge. The new challenge is rendered in place; no page reload is requested.
-- The JavaScript cache key is bumped so the browser loads the corrected handler.
+- The intake form uses a normal browser POST. JavaScript does not intercept submission or run an AJAX retry loop.
+- The recurring visible arithmetic challenge has been removed; there is no human-answer field or challenge prompt in the intake UI. Flask-WTF CSRF, a signed per-form idempotency reference, a hidden honeypot, server-side validation and rate limiting remain.
+- Optional phone, incident-date, account-handle and evidence fields safely accept blank submissions.
+- Expired CSRF submissions re-render the same form with visitor-entered values preserved, a fresh CSRF token and the signed case reference preserved when its signature remains valid.
+- A successful submission commits the case and advisory triage report before a 303 redirect to the separate signed case-ready page.
+- The case-ready page retrieves the saved case and exposes exactly one WhatsApp link. The message is generated from the saved record and includes requester and incident information, original narrative, risk indicators and the advisory triage report.
+- The hand-off token contains only the case reference and expires after 24 hours.
+- Legacy databases receive a unique case-reference index migration; duplicate existing references stop startup with a clear error instead of disabling idempotency.
 
-## Verification completed in this environment
-- `pytest -q`: **51 passed**.
-- `python -m py_compile app.py security_utils.py whatsapp_utils.py`: passed.
-- Python AST parse: 12 project/test Python files passed.
-- `node --check static/js/app.js`: passed.
-- Jinja parse: all 9 templates passed.
-- Regression tests exercise actual extracted ItsDangerous helper functions for (a) a valid but expired token preserving its reference and challenge, and (b) a token signed by an old secret producing a fresh challenge.
-- ZIP contents and SHA-256 checksum verified after packaging.
+## Local checks completed
 
-## Not verified here
-Flask, Flask-SQLAlchemy, Flask-WTF and Flask-Limiter are not installed in this build runtime, and package-index access is unavailable. Therefore a full Flask test-client submission against PostgreSQL, a live Render request, and WhatsApp launch/send could not be run here. The application must be deployed to staging and tested with a dummy case before receiving real customer records.
+- `pytest -q`: **54 passed**.
+- Python compilation: `app.py`, `security_utils.py`, `whatsapp_utils.py`.
+- JavaScript syntax: `node --check static/js/app.js`.
+- Jinja parsing: all 10 templates.
+- YAML parsing: `render.yaml`.
+- ZIP integrity and SHA-256 checked after packaging.
+
+## Verification boundary
+
+This environment does not have Flask, Flask-WTF, Flask-SQLAlchemy or Flask-Limiter installed, and package-index access is unavailable. Therefore a full Flask test-client POST, live Render PostgreSQL transaction and real WhatsApp app launch/send could not be executed here. Perform one dummy submission after deployment before accepting real customer records.

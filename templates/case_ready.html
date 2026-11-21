@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('case_ready_title') }} — YAKUZA{% endblock %}
+{% block content %}
+<section class="page-hero compact case-intro-hero">
+  <span class="section-kicker">YAKUZA / 02</span>
+  <h1>{{ t('case_ready_title') }}</h1>
+  <p>{{ t('case_ready_intro') }}</p>
+</section>
+<section class="case-ready-wrap">
+  <div class="case-ready-card form-panel">
+    <div class="case-ready-status"><span aria-hidden="true">✓</span> {{ t('case_ready_status') }}</div>
+    <div class="case-ready-reference">
+      <small>{{ t('case_ready_reference') }}</small>
+      <strong>{{ item.case_ref }}</strong>
+    </div>
+    <dl class="case-ready-summary">
+      <div><dt>{{ t('platform_label') }}</dt><dd>{{ t('platform_none') if item.platform == 'not-specified' else t('platform_' ~ item.platform) }}</dd></div>
+      <div><dt>{{ t('category_label') }}</dt><dd>{{ t('cat_' ~ item.topic) }}</dd></div>
+      <div><dt>{{ t('priority_label') }}</dt><dd>{{ t('priority_' ~ item.urgency) }}</dd></div>
+    </dl>
+    <a class="button button-primary case-submit case-ready-send" id="case-ready-whatsapp" href="{{ whatsapp_url }}" rel="noreferrer">{{ t('case_ready_send') }} <span aria-hidden="true">↗</span></a>
+    <p class="submit-footnote">{{ t('case_ready_note') }}</p>
+  </div>
+</section>
+{% endblock %}
