@@ -564,11 +564,10 @@ class InquiryForm(FlaskForm):
     account_handle=StringField(validators=[Optional(),Length(max=120)])
     evidence_url=StringField(validators=[Optional(),Length(max=500)])
     urgency=SelectField(choices=[('normal','Normal'),('high','High'),('critical','Critical')],validators=[DataRequired()])
-    authorization=StringField(validators=[DataRequired()])
     phone=StringField(validators=[Optional(),Length(max=40)])
     platform=SelectField(choices=[('not-specified','Not specified'),('instagram','Instagram'),('facebook','Facebook'),('tiktok','TikTok'),('google','Google'),('x','X'),('linkedin','LinkedIn'),('other','Other')], validators=[DataRequired()])
     website=StringField(validators=[Optional(),Length(max=0)])
-    whatsapp_consent=StringField(validators=[Optional(),Length(max=3)])
+    whatsapp_consent=StringField(validators=[DataRequired(),Length(max=3)])
     submit=SubmitField()
 class LoginForm(FlaskForm):
     username=StringField(validators=[DataRequired(),Length(max=80)])
@@ -661,9 +660,6 @@ def contact():
 
     if form.website.data:
         abort(400)
-    if form.authorization.data != 'yes':
-        flash(tr('intake_form_error'), 'error')
-        return render_template('contact.html', form=form), 400
     if form.whatsapp_consent.data != 'yes':
         flash(tr('whatsapp_consent_required'), 'error')
         return render_template('contact.html', form=form), 400

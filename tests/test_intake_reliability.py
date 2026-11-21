@@ -23,12 +23,14 @@ def test_intake_has_no_extra_contact_choice_or_custom_form_token():
     source = (ROOT / 'app.py').read_text(encoding='utf-8')
     form = source[source.index('class InquiryForm'):source.index('class LoginForm')]
     assert 'contact_method=' not in form
+    assert 'authorization=' not in form
     assert 'case_token' not in form
     assert 'human_answer' not in form
     template = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
     assert template.count('type="submit"') == 1
     assert 'form.hidden_tag()' in template
     assert 'contact-choice' not in template
+    assert template.count('name="whatsapp_consent"') == 1
 
 
 def test_case_is_saved_before_redirect_to_signed_second_page():
