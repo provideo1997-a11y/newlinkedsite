@@ -543,7 +543,7 @@ INTAKE_ERROR_COPY = {
     'ar-tn': {'intake_form_error':'راجع الخانات المعلّمة وعاود المحاولة.', 'intake_csrf_error':'معلوماتك مازالت موجودة. حدّثنا حماية الفورم وتوّا نكمّلوا الطلب.'},
     'es': {'intake_form_error':'Revisa los campos señalados y vuelve a intentarlo.', 'intake_csrf_error':'Tus datos siguen aquí. Hemos actualizado la seguridad del formulario y continuamos con el envío.'},
     'de': {'intake_form_error':'Bitte prüfe die markierten Felder und versuche es erneut.', 'intake_csrf_error':'Deine Angaben sind noch da. Wir haben den Formularschutz erneuert und setzen deine Übermittlung fort.'},
-    'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':'I tuoi dati sono ancora qui. Abbiamo aggiornato la sicurezza del modulo e procediamo con l'invio.'},
+    'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':"I tuoi dati sono ancora qui. Abbiamo aggiornato la sicurezza del modulo e procediamo con l'invio."},
     'pt': {'intake_form_error':'Verifique os campos assinalados e tente novamente.', 'intake_csrf_error':'Os seus dados continuam aqui. Atualizámos a segurança do formulário e vamos continuar o envio.'},
     'tr': {'intake_form_error':'Lütfen işaretli alanları kontrol edip tekrar deneyin.', 'intake_csrf_error':'Bilgileriniz burada. Form güvenliğini yeniledik ve gönderiminize devam ediyoruz.'},
     'zh': {'intake_form_error':'请检查标记的字段后重试。', 'intake_csrf_error':'你的资料仍在此处。表单安全已刷新，正在继续提交。'},
