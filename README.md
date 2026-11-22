@@ -95,7 +95,8 @@ Render Free web services sleep after 15 minutes without inbound traffic; the fir
 - Default intake limit is 30 submissions per hour per client IP; general app limits also apply.
 - Risk indicators are advisory and are not fraud determinations.
 - Dashboard search/filter applies to the 250 most recent rows loaded; CSV export covers all stored rows.
-- Admin/dashboard and primary intake flow are bundled for English, French, Arabic, Tunisian Arabic, Spanish, German, Italian, Portuguese, Turkish, Simplified Chinese and Japanese.
+- The public language selector offers exactly four choices: Tunisian Arabic, French, English and Arabic. Older internal locale catalogs remain available for compatibility but are not shown to visitors.
+- The WhatsApp hand-off is a real button on the saved-case page. It opens the prepared report in a separate tab when the browser permits, leaving the YAKUZA confirmation page available.
 
 ## Data and privacy
 

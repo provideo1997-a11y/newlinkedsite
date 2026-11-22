@@ -43,9 +43,9 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax',
     SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','0') == '1',
     # Flask-WTF / itsdangerous expects an integer number of seconds here.
-    WTF_CSRF_TIME_LIMIT=12 * 60 * 60,
+    WTF_CSRF_TIME_LIMIT=24 * 60 * 60,
     MAX_CONTENT_LENGTH=64 * 1024,
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=24),
     SESSION_REFRESH_EACH_REQUEST=True,
 )
 db=SQLAlchemy(app); csrf=CSRFProtect(app)
@@ -537,10 +537,10 @@ for _locale_catalog in LANGS.values():
 
 # Server-rendered intake errors; no client-side challenge/retry loop.
 INTAKE_ERROR_COPY = {
-    'en': {'intake_form_error':'Please check the highlighted fields and try again.', 'intake_csrf_error':'Your form session expired. Your entries have been kept. Please press Create secure case again.'},
-    'fr': {'intake_form_error':'Vérifiez les champs signalés puis réessayez.', 'intake_csrf_error':'Votre session a expiré. Vos réponses ont été conservées. Cliquez à nouveau sur Créer le dossier sécurisé.'},
-    'ar': {'intake_form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.', 'intake_csrf_error':'انتهت جلسة النموذج وتم الاحتفاظ ببياناتك. اضغط إنشاء الملف الآمن مرة أخرى.'},
-    'ar-tn': {'intake_form_error':'راجع الخانات المعلّمة وعاود المحاولة.', 'intake_csrf_error':'وفات جلسة الفورم أما معلوماتك بقات محفوظة. اضغط سجّل الملف الآمن من جديد.'},
+    'en': {'intake_form_error':'Please check the highlighted fields and try again.', 'intake_csrf_error':'This form was open for too long. Refresh the page, then send your request again.'},
+    'fr': {'intake_form_error':'Vérifiez les champs signalés puis réessayez.', 'intake_csrf_error':'Le formulaire est resté ouvert trop longtemps. Actualisez la page puis envoyez à nouveau votre demande.'},
+    'ar': {'intake_form_error':'يرجى مراجعة الحقول المحددة ثم المحاولة مجدداً.', 'intake_csrf_error':'ظلّ النموذج مفتوحاً مدة طويلة. حدّث الصفحة ثم أرسل طلبك من جديد.'},
+    'ar-tn': {'intake_form_error':'راجع الخانات المعلّمة وعاود المحاولة.', 'intake_csrf_error':'الفورم قعد محلول برشة وقت. حدّث الصفحة وعاود ابعث طلبك.'},
     'es': {'intake_form_error':'Revisa los campos señalados y vuelve a intentarlo.', 'intake_csrf_error':'La sesión del formulario caducó. Conservamos tus datos. Pulsa de nuevo Crear caso seguro.'},
     'de': {'intake_form_error':'Bitte prüfe die markierten Felder und versuche es erneut.', 'intake_csrf_error':'Deine Formularsitzung ist abgelaufen. Deine Eingaben bleiben erhalten. Klicke erneut auf Sicheren Fall erstellen.'},
     'it': {'intake_form_error':'Controlla i campi evidenziati e riprova.', 'intake_csrf_error':'La sessione del modulo è scaduta. I tuoi dati sono stati conservati. Premi di nuovo Crea caso sicuro.'},
@@ -606,10 +606,23 @@ def issue_case_handoff_token(case_ref):
     return _case_handoff_serializer.dumps({'ref': case_ref})
 
 
+# The public site intentionally offers four languages only. Additional locale
+# catalogs remain available internally for existing admin records and translations.
+PUBLIC_LANGUAGE_CODES = ('ar-tn', 'fr', 'en', 'ar')
+PUBLIC_LANGUAGE_NAMES = {'ar-tn': 'تونسي', 'fr': 'Français', 'en': 'English', 'ar': 'العربية'}
+
 def tr(key): return LANGS.get(session.get('lang','en'),LANGS['en']).get(key,LANGS['en'].get(key,key))
 @app.context_processor
 def inject():
-    lang=session.get('lang','en'); return {'t':tr,'lang':lang,'languages':LANGS,'direction':LANGS.get(lang,LANGS['en'])['dir']}
+    lang=session.get('lang','en')
+    if lang not in PUBLIC_LANGUAGE_CODES:
+        lang = 'en'
+        session['lang'] = lang
+    public_languages = {
+        code: {**LANGS[code], 'name': PUBLIC_LANGUAGE_NAMES[code]}
+        for code in PUBLIC_LANGUAGE_CODES
+    }
+    return {'t':tr,'lang':lang,'languages':public_languages,'direction':LANGS.get(lang,LANGS['en'])['dir']}
 @app.before_request
 def language_and_security():
     # Correlate each request without logging submitted personal information or signed URL tokens.

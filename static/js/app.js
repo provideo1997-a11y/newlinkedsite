@@ -168,6 +168,23 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Open the prepared WhatsApp report from a direct button click.
+  // Keep this YAKUZA confirmation tab open so visitors can return after sending.
+  const whatsappButton = document.getElementById('case-ready-whatsapp');
+  if (whatsappButton) {
+    whatsappButton.addEventListener('click', () => {
+      const target = whatsappButton.dataset.whatsappUrl;
+      if (!target) return;
+      const opened = window.open(target, '_blank');
+      if (opened) {
+        try { opened.opener = null; } catch (_error) { /* Browser may isolate the new tab automatically. */ }
+      } else {
+        // Popup blockers can prevent a new tab; still let the visitor continue.
+        window.location.assign(target);
+      }
+    });
+  }
+
   const printButton = document.getElementById('print-report');
   if (printButton) printButton.addEventListener('click', () => window.print());
 

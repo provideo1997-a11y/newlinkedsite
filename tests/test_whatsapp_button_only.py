@@ -17,9 +17,9 @@ def test_first_page_has_one_create_case_submit_and_no_whatsapp_choice():
 def test_second_page_has_one_whatsapp_action_and_a_return_path():
     page = (ROOT / 'templates/case_ready.html').read_text(encoding='utf-8')
     assert page.count('id="case-ready-whatsapp"') == 1
-    assert page.count('href="{{ whatsapp_url }}"') == 1
-    assert 'target="_blank"' in page
-    assert 'rel="noopener noreferrer"' in page
+    assert page.count('data-whatsapp-url="{{ whatsapp_url }}"') == 1
+    assert '<button' in page and 'type="button"' in page
+    assert 'href="{{ whatsapp_url }}"' not in page
     assert "t('case_ready_send')" in page
     assert "url_for('home')" in page
     assert "t('back')" in page
