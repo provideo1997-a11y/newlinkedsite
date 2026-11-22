@@ -16,7 +16,7 @@ def test_public_intake_is_exempt_from_expiring_csrf_token_validation():
     assert 'CSRFProtect(app)' in source  # retained for admin and other protected routes
 
 
-def test_public_intake_checks_exact_same_origin_and_rejects_cross_site():
+def test_public_intake_rejects_explicit_cross_site_but_allows_missing_origin():
     source = (ROOT / 'app.py').read_text(encoding='utf-8')
     start = source.index('def is_same_origin_intake_submission():')
     end = source.index("@app.route('/contact', methods=['GET', 'POST'])", start)
@@ -24,7 +24,9 @@ def test_public_intake_checks_exact_same_origin_and_rejects_cross_site():
     assert "request.headers.get('Origin', '').strip()" in helper
     assert "request.headers.get('Referer', '').strip()" in helper
     assert "fetch_site == 'cross-site'" in helper
-    assert 'actual.netloc.lower() == expected.netloc.lower()' in helper
+    assert "actual.netloc.split(':', 1)[0].lower() == expected_host" in helper
+    assert "if not supplied or supplied.lower() == 'null':" in helper
+    assert "actual.scheme.lower() not in ('http', 'https')" in helper
 
 
 def test_contact_pages_are_not_cached():

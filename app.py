@@ -664,29 +664,28 @@ def services(): return render_template('services.html')
 @app.get('/about')
 def about(): return render_template('about.html')
 def is_same_origin_intake_submission():
-    """Allow browser form posts only from this exact site origin."""
+    """Reject explicit cross-site posts without depending on proxy URL schemes."""
     from urllib.parse import urlsplit
 
-    expected = urlsplit(request.host_url)
-    origin = request.headers.get('Origin', '').strip()
-    referer = request.headers.get('Referer', '').strip()
-    fetch_site = request.headers.get('Sec-Fetch-Site', '').lower()
-
+    expected_host = request.host.split(':', 1)[0].lower()
+    fetch_site = request.headers.get('Sec-Fetch-Site', '').strip().lower()
     if fetch_site == 'cross-site':
         return False
 
+    # Browsers normally send Origin on POST. Some privacy tools and older
+    # clients omit it; allow those requests rather than breaking the intake.
+    origin = request.headers.get('Origin', '').strip()
+    referer = request.headers.get('Referer', '').strip()
     supplied = origin or referer
-    if not supplied:
-        return False
+    if not supplied or supplied.lower() == 'null':
+        return True
 
     actual = urlsplit(supplied)
-    return (
-        actual.scheme == expected.scheme
-        and actual.netloc.lower() == expected.netloc.lower()
-        and actual.username is None
-        and actual.password is None
-    )
-
+    if actual.scheme.lower() not in ('http', 'https') or not actual.netloc:
+        return False
+    if actual.username is not None or actual.password is not None:
+        return False
+    return actual.netloc.split(':', 1)[0].lower() == expected_host
 
 @app.route('/contact', methods=['GET', 'POST'])
 @csrf.exempt
