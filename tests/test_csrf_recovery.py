@@ -13,6 +13,10 @@ def test_intake_uses_only_flask_wtf_csrf_without_custom_case_token():
     assert '_case_token_serializer' not in source
     assert 'refresh_case_token' not in source
     assert 'CSRFProtect(app)' in source
+    assert 'class Meta:' in form_source
+    assert 'csrf = False' in form_source
+    assert '@csrf.exempt' in source
+    assert 'def is_same_origin_intake_submission()' in source
 
 
 def test_csrf_error_re_renders_form_without_challenge_or_token_retry_loop():
@@ -33,6 +37,7 @@ def test_contact_form_is_normal_html_post_and_keeps_one_create_button():
     form = (ROOT / 'templates/contact.html').read_text(encoding='utf-8')
     assert 'method="post"' in form
     assert 'form.hidden_tag()' in form
+    assert 'csrf_token' not in form
     assert form.count('type="submit"') == 1
     assert 'contact-choice' not in form
     assert 'name="contact_method"' not in form
