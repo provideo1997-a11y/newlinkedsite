@@ -20,7 +20,9 @@ def test_csrf_error_re_renders_form_without_challenge_or_token_retry_loop():
     start = source.index('@app.errorhandler(CSRFError)')
     end = source.index('@app.errorhandler(Exception)', start)
     handler = source[start:end]
-    assert 'InquiryForm(formdata=request.form' in handler
+    assert "session.pop('csrf_token', None)" in handler
+    assert "formdata.pop('csrf_token', None)" in handler
+    assert 'InquiryForm(formdata=formdata)' in handler
     assert "flash(tr('intake_csrf_error'), 'error')" in handler
     assert "render_template('contact.html', form=form)" in handler
     assert 'refresh_case_token' not in handler
