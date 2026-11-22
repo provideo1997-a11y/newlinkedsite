@@ -776,11 +776,20 @@ def handle_csrf_error(error):
             return render_template('admin_login.html', form=LoginForm()), 400
         return render_template('index.html'), 400
 
-    # Preserve submitted fields. Flask-WTF generates a fresh CSRF token
-    # when the form is rendered again.
-    form = InquiryForm(formdata=request.form if request.method == 'POST' else None)
+    # Preserve submitted fields, but NEVER echo the rejected CSRF token back
+    # into the refreshed form. Doing so creates an endless expired-token loop:
+    # every retry submits the same token and fails again.
+    session.pop('csrf_token', None)
+    formdata = request.form.copy() if request.method == 'POST' else None
+    if formdata is not None:
+        formdata.pop('csrf_token', None)
+    form = InquiryForm(formdata=formdata)
     flash(tr('intake_csrf_error'), 'error')
-    return render_template('contact.html', form=form), 400
+    response = app.make_response(render_template('contact.html', form=form))
+    response.status_code = 400
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+    response.headers['Pragma'] = 'no-cache'
+    return response
 
 
 @app.errorhandler(Exception)
