@@ -38,7 +38,7 @@ def test_second_page_has_one_whatsapp_link_and_no_extra_actions():
     assert '<button' in page and 'type="button"' in page
     assert 'href="{{ whatsapp_url }}"' not in page
     assert "url_for('home')" in page
-    assert page.count('href="{{ whatsapp_url }}"') == 1
+    assert page.count('data-whatsapp-url="{{ whatsapp_url }}"') == 1
 
 
 def test_whatsapp_message_contains_full_saved_case_report():
