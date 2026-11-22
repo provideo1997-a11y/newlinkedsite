@@ -18,7 +18,7 @@
       <div><dt>{{ t('category_label') }}</dt><dd>{{ t('cat_' ~ item.topic) }}</dd></div>
       <div><dt>{{ t('priority_label') }}</dt><dd>{{ t('priority_' ~ item.urgency) }}</dd></div>
     </dl>
-    <a class="button button-primary case-submit case-ready-send" id="case-ready-whatsapp" href="{{ whatsapp_url }}" target="_blank" rel="noopener noreferrer">{{ t('case_ready_send') }} <span aria-hidden="true">↗</span></a>
+    <button class="button button-primary case-submit case-ready-send" type="button" id="case-ready-whatsapp" data-whatsapp-url="{{ whatsapp_url }}">{{ t('case_ready_send') }} <span aria-hidden="true">↗</span></button>
     <p class="submit-footnote">{{ t('case_ready_note') }}</p>
     <p class="case-ready-return-wrap">
       <a class="case-ready-return" href="{{ url_for('home') }}">{{ t('back') }}</a>
