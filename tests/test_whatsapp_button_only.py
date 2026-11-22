@@ -23,7 +23,7 @@ def test_second_page_has_one_whatsapp_action_and_a_return_path():
     assert "t('case_ready_send')" in page
     assert "url_for('home')" in page
     assert "t('back')" in page
-    assert 'After pressing Send in WhatsApp' in page
+    assert 'case-ready-return-wrap' in page
 
 
 def test_success_is_post_redirect_get_to_signed_saved_case_page():
