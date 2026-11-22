@@ -14,11 +14,16 @@ def test_first_page_has_one_create_case_submit_and_no_whatsapp_choice():
     assert 'whatsapp-consent' in form and 'required' in form
 
 
-def test_second_page_has_exactly_one_whatsapp_action():
+def test_second_page_has_one_whatsapp_action_and_a_return_path():
     page = (ROOT / 'templates/case_ready.html').read_text(encoding='utf-8')
     assert page.count('id="case-ready-whatsapp"') == 1
-    assert page.count('<a ') == 1
+    assert page.count('href="{{ whatsapp_url }}"') == 1
+    assert 'target="_blank"' in page
+    assert 'rel="noopener noreferrer"' in page
     assert "t('case_ready_send')" in page
+    assert "url_for('home')" in page
+    assert "t('back')" in page
+    assert 'case-ready-return-wrap' in page
 
 
 def test_success_is_post_redirect_get_to_signed_saved_case_page():

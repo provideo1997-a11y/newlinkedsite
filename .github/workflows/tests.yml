@@ -1,0 +1,32 @@
+name: Test YAKUZA
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: Compile Python modules
+        run: python -m compileall -q app.py security_utils.py whatsapp_utils.py
+      - name: Check JavaScript syntax
+        run: node --check static/js/app.js
+      - name: Run regression tests
+        run: pytest -q
