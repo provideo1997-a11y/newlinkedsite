@@ -557,6 +557,11 @@ for _locale, _copy in INTAKE_RATE_LIMIT_COPY.items():
     LANGS[_locale].update(_copy)
 
 class InquiryForm(FlaskForm):
+    # Public intake deliberately has no expiring CSRF token. The route uses
+    # strict same-origin request validation, rate limiting, and a honeypot.
+    class Meta:
+        csrf = False
+
     name=StringField(validators=[DataRequired(),Length(min=2,max=100)])
     email=EmailField(validators=[DataRequired(),Email(),Length(max=180)])
     topic=SelectField(choices=[('recovery','Account recovery'),('hacked','Compromised account'),('impersonation','Impersonation / fake profile'),('scam','Scam incident review'),('privacy','Privacy / data exposure'),('reputation','Brand / reputation protection'),('compliance','Compliance advisory'),('security','Security check-up'),('risk','Digital risk response'),('other','Other')], validators=[DataRequired()])
@@ -658,17 +663,44 @@ def home(): return render_template('index.html')
 def services(): return render_template('services.html')
 @app.get('/about')
 def about(): return render_template('about.html')
+def is_same_origin_intake_submission():
+    """Allow browser form posts only from this exact site origin."""
+    from urllib.parse import urlsplit
+
+    expected = urlsplit(request.host_url)
+    origin = request.headers.get('Origin', '').strip()
+    referer = request.headers.get('Referer', '').strip()
+    fetch_site = request.headers.get('Sec-Fetch-Site', '').lower()
+
+    if fetch_site == 'cross-site':
+        return False
+
+    supplied = origin or referer
+    if not supplied:
+        return False
+
+    actual = urlsplit(supplied)
+    return (
+        actual.scheme == expected.scheme
+        and actual.netloc.lower() == expected.netloc.lower()
+        and actual.username is None
+        and actual.password is None
+    )
+
+
 @app.route('/contact', methods=['GET', 'POST'])
+@csrf.exempt
 @limiter.limit(os.environ.get('INTAKE_RATE_LIMIT', '30 per hour'), methods=['POST'])
 def contact():
-    """Simple two-page intake: save the case, then show one WhatsApp button."""
+    """Simple two-page intake: no expiring form token; strict same-origin POST."""
     form = InquiryForm()
 
     if request.method == 'GET':
         return render_template('contact.html', form=form)
 
-    # Flask-WTF validates the ordinary session CSRF token. No custom per-form
-    # challenge, AJAX request, signed intake token, or retry loop is involved.
+    if not is_same_origin_intake_submission():
+        abort(403)
+
     if not form.validate_on_submit():
         flash(tr('intake_form_error'), 'error')
         return render_template('contact.html', form=form), 400
