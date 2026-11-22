@@ -34,10 +34,9 @@ def test_second_page_loads_saved_case_and_contains_server_generated_whatsapp_lin
 def test_second_page_has_one_whatsapp_link_and_no_extra_actions():
     page = (ROOT / 'templates/case_ready.html').read_text(encoding='utf-8')
     assert page.count('id="case-ready-whatsapp"') == 1
-    assert 'href="{{ whatsapp_url }}"' in page
-    assert "t('case_ready_send')" in page
-    assert 'target="_blank"' in page
-    assert 'rel="noopener noreferrer"' in page
+    assert 'data-whatsapp-url="{{ whatsapp_url }}"' in page
+    assert '<button' in page and 'type="button"' in page
+    assert 'href="{{ whatsapp_url }}"' not in page
     assert "url_for('home')" in page
     assert page.count('href="{{ whatsapp_url }}"') == 1
 
