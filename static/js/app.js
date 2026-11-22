@@ -175,8 +175,13 @@ document.addEventListener('DOMContentLoaded', () => {
     whatsappButton.addEventListener('click', () => {
       const target = whatsappButton.dataset.whatsappUrl;
       if (!target) return;
-      const opened = window.open(target, '_blank', 'noopener,noreferrer');
-      if (!opened) window.location.assign(target);
+      const opened = window.open(target, '_blank');
+      if (opened) {
+        try { opened.opener = null; } catch (_error) { /* Browser may isolate the new tab automatically. */ }
+      } else {
+        // Popup blockers can prevent a new tab; still let the visitor continue.
+        window.location.assign(target);
+      }
     });
   }
 
