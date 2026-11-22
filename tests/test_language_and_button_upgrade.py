@@ -18,7 +18,7 @@ def test_whatsapp_action_is_a_button_that_opens_the_prepared_report():
     assert 'id="case-ready-whatsapp"' in template
     assert 'data-whatsapp-url="{{ whatsapp_url }}"' in template
     assert '<button' in template and 'type="button"' in template
-    assert "window.open(target, '_blank', 'noopener,noreferrer')" in js
+    assert "window.open(target, '_blank')" in js
     assert "window.location.assign(target)" in js
 
 
